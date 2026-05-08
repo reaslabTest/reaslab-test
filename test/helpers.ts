@@ -917,6 +917,145 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
   return true;
 }
 
+/** `docs/用户场景.md` §7.7：**Models** 中未找到 **SiliconFlow** 或未展开时的 **`test.skip`** 说明。 */
+export const MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG =
+  "§7.7：ReasLingo Settings → Models 中未找到可展开的 SiliconFlow（或环境未展示该 Provider），跳过。";
+
+/** 与 **`docs/用户场景.md`** §7.7 步骤 3 一致（产品内展示文案）。 */
+export const CH7_SETTINGS_USER_RULE_TEXT = "Always response in English";
+
+/**
+ * 内层 **Models / User Rules / Tools & MCP** 的 **`tablist`**（与 **`ReasLingoSettings.tsx`** 一致）；
+ * 用 **`has`「Tools & MCP」** 与顶层编辑器文件 **TabsList** 区分。
+ */
+function reasLingoIdeSettingsInnerTablist(page: Page): Locator {
+  return page.getByRole("tablist").filter({
+    has: page.getByRole("tab", { name: "Tools & MCP", exact: true }),
+  });
+}
+
+/** 侧栏 **ReasLingo** 顶栏 **`title="Settings"`** → 打开编辑器虚拟页 **ReasLingo Settings**（`reaslingo://settings`）。 */
+export async function reasLingoOpenIdeAiSettings(page: Page): Promise<void> {
+  await ensureReasLingoVisible(page);
+  const sidebar = page
+    .locator('[data-sidebar="group"]')
+    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .first();
+  await expect(sidebar.getByRole("button", { name: "Settings", exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "ReasLingo Settings" })).toBeVisible({ timeout: 30_000 });
+  await expect(reasLingoIdeSettingsInnerTablist(page)).toBeVisible({ timeout: 20_000 });
+}
+
+/** 关闭 **ReasLingo Settings** 编辑器 Tab（与 **`editor-tabs.tsx`** 的 **Close** 按钮一致）。 */
+export async function reasLingoCloseIdeAiSettingsTab(page: Page): Promise<void> {
+  const row = page.locator("div.group").filter({ has: page.getByText("ReasLingo Settings", { exact: true }) });
+  const closeBtn = row.getByRole("button", { name: "Close", exact: true }).first();
+  if ((await closeBtn.count()) > 0) {
+    await closeBtn.click({ timeout: 10_000 });
+  }
+}
+
+/**
+ * **`docs/用户场景.md` §7.7**：**Models**（SiliconFlow、**`test`** 占位模型）→ **User Rules** → **Tools & MCP**（4 个 MCP）→
+ * 关闭设置；侧栏 **Switch Model** 列表中可见 **`test`**。
+ *
+ * @returns **`false`** 仅当找不到 **SiliconFlow** 展开行（调用方 **`test.skip`**）；其余步骤失败时 **抛出**。
+ */
+export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
+  await reasLingoOpenIdeAiSettings(page);
+  const innerTabs = reasLingoIdeSettingsInnerTablist(page);
+
+  await innerTabs.getByRole("tab", { name: "Models", exact: true }).click();
+  const modelsPanel = page.getByRole("tabpanel", { name: "Models", exact: true });
+  await expect(modelsPanel).toBeVisible({ timeout: 15_000 });
+
+  const sfTrigger = modelsPanel.getByRole("button", { name: /SiliconFlow/i }).first();
+  if ((await sfTrigger.count()) < 1) {
+    await reasLingoCloseIdeAiSettingsTab(page);
+    return false;
+  }
+
+  await test.step("§7.7-2 Models：SiliconFlow → Add Model → test / test → Save", async () => {
+    await sfTrigger.click();
+
+    const openPanel = page
+      .locator('[data-state="open"]')
+      .filter({ has: page.getByRole("button", { name: /Add Model/i }) })
+      .first();
+    await expect(openPanel.getByPlaceholder("Enter API Key")).toBeVisible({ timeout: 20_000 });
+    await openPanel.getByPlaceholder("Enter API Key").fill("test");
+
+    await openPanel.getByRole("button", { name: /Add Model/i }).click();
+
+    await openPanel.getByPlaceholder("e.g. deepseek-custom").fill("test");
+    await openPanel.getByPlaceholder("e.g. deepseek-chat").fill("test");
+
+    const addBlock = openPanel
+      .locator("div")
+      .filter({ has: page.getByPlaceholder("e.g. deepseek-chat") })
+      .filter({ has: page.getByRole("button", { name: "Save", exact: true }) })
+      .first();
+    await addBlock.getByRole("button", { name: "Save", exact: true }).click();
+
+    await expect(openPanel.getByRole("button", { name: /Add Model/i })).toBeVisible({ timeout: 120_000 });
+  });
+
+  await test.step("§7.7-3 User Rules：+ Add Rule → Always response in English → Save", async () => {
+    await innerTabs.getByRole("tab", { name: "User Rules", exact: true }).click();
+    const userPanel = page.getByRole("tabpanel", { name: "User Rules", exact: true });
+    await expect(userPanel).toBeVisible({ timeout: 15_000 });
+
+    const existingRule = userPanel.getByText(CH7_SETTINGS_USER_RULE_TEXT, { exact: true });
+    if ((await existingRule.count()) < 1 || !(await existingRule.first().isVisible().catch(() => false))) {
+      await userPanel.getByRole("button", { name: /Add Rule/i }).click();
+      const tb = userPanel.getByRole("textbox").first();
+      await expect(tb).toBeVisible({ timeout: 10_000 });
+      await tb.fill(CH7_SETTINGS_USER_RULE_TEXT);
+      await userPanel.getByRole("button", { name: "Save", exact: true }).first().click();
+    }
+    await expect(userPanel.getByText(CH7_SETTINGS_USER_RULE_TEXT, { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+  });
+
+  await test.step("§7.7-4 Tools & MCP：Installed MCP Servers ×4", async () => {
+    await innerTabs.getByRole("tab", { name: "Tools & MCP", exact: true }).click();
+    const toolsPanel = page.getByRole("tabpanel", { name: "Tools & MCP", exact: true });
+    await expect(toolsPanel).toBeVisible({ timeout: 15_000 });
+    await expect(toolsPanel.getByRole("heading", { name: "Installed MCP Servers", exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    for (const id of ["python_mcp", "tex_mcp", "lean_mcp", "lake_mcp"] as const) {
+      await expect(toolsPanel.getByText(id, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+    }
+  });
+
+  await test.step("§7.7-5 关闭设置；侧栏 Switch Model 列表含 test", async () => {
+    await reasLingoCloseIdeAiSettingsTab(page);
+
+    const host = page
+      .locator('[data-sidebar="group"]')
+      .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+      .filter({ has: page.getByTitle("Add Context") })
+      .first();
+    await expect(host).toBeVisible({ timeout: 20_000 });
+
+    const modelTrigger = host.locator('button[title="Switch Model"]').first();
+    await expect(modelTrigger).toBeVisible({ timeout: 15_000 });
+    await modelTrigger.click();
+
+    const menu = page.locator('[data-slot="dropdown-menu-content"]').filter({ visible: true }).first();
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+    await expect(menu.getByText(/^test$/).first()).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press("Escape");
+  });
+
+  return true;
+}
+
 /** MIL 入门路径（与 monorepo e2e `TEST_FILES.GETTING_STARTED` 对齐）。 */
 export const MIL_GETTING_STARTED_SEGMENTS = ["MIL", "C01_Introduction", "S01_Getting_Started.lean"];
 

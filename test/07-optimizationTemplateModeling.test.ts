@@ -1,10 +1,11 @@
 /**
- * **`docs/用户场景.md`** §7：**7.1～7.6** E2E 已覆盖；**§7.7**（**Settings** 齿轮）见主文档，**E2E 待补**。
+ * **`docs/用户场景.md`** §7：**7.1～7.7** E2E（含 **§7.7** **`ReasLingo` → Settings** 与 **`reasLingoIdeSettingsAiFlow`**）。
  */
 import { expect, test } from "@playwright/test";
 
 import {
   MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG,
+  MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG,
   MODELING_PYTHON_CONSOLE_GUROBI_SKIP_MSG,
   MODELING_CH7_SKIP_MSG,
   clickEditorToolbarRunPython,
@@ -13,6 +14,7 @@ import {
   openLeafFile,
   readFirstPythonDataNameFromIdeFileTree,
   reasLingoDefaultAgentMcpPythonProbe,
+  reasLingoIdeSettingsAiFlow,
   reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou,
   reasLingoWhoAreYouProbe,
   tryEnterOptimizationTemplateModelingIde,
@@ -141,5 +143,16 @@ test.describe("7. 模板创建优化建模项目", () => {
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     const ok = await reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou(page);
     test.skip(!ok, MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG);
+  });
+
+  /**
+   * **`docs/用户场景.md`** §7.7：侧栏 **Settings** → **ReasLingo Settings** 虚拟 Tab → **Models** / **User Rules** / **Tools & MCP**；
+   * 与 **`reasLingoIdeSettingsAiFlow`**（**`helpers.ts`**）步骤一致。
+   */
+  test("7.7 设置 AI（齿轮：模型、用户规则、Tools & MCP）", async ({ page }) => {
+    test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
+    await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
+    const ok = await reasLingoIdeSettingsAiFlow(page);
+    test.skip(!ok, MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG);
   });
 });
