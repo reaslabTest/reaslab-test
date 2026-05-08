@@ -1006,6 +1006,19 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
       .first();
     await expect(siliconCollapsible).toBeVisible({ timeout: 15_000 });
 
+    /** 上轮 E2E 或手工已创建 **`test`** 时，再 **Add Model** 同名会与 **`handleSaveAddModel`** 冲突；先删再建（**`ModelsConfig`** 删除确认 **Remove**）。 */
+    const staleDelete = siliconCollapsible.locator('button[title="Delete test"]').first();
+    if ((await staleDelete.count()) > 0 && (await staleDelete.isVisible().catch(() => false))) {
+      await staleDelete.scrollIntoViewIfNeeded();
+      await staleDelete.click();
+      const confirmDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Are you sure you want to remove the model/i });
+      await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+      await confirmDlg.getByRole("button", { name: "Remove" }).click();
+      await expect(confirmDlg).toBeHidden({ timeout: 30_000 });
+    }
+
     const apiKeyInput = siliconCollapsible.locator('input[placeholder="Enter API Key"]');
     await apiKeyInput.scrollIntoViewIfNeeded();
     await expect(apiKeyInput).toBeVisible({ timeout: 30_000 });
