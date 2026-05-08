@@ -1,0 +1,72 @@
+# 每 2 小时执行（UTC）：按 **`common/run-scope.txt`** 列出的章节号跑 E2E（`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** `--scope-file=common/run-scope.txt` + `--exit-zero-on-e2e-failure`，例如 `01`→`01-playground.test.ts`、`05`→`05-blankModeling.test.ts`）→ 部署 `playwright-report` 到 Vercel → 飞书（卡片底部「打开报告」链接；正文「被测网站」由 **send-feishu.mjs** 读取 **`E2E_BASE_URL`**，未设置时默认 **beta**，与 `common/global-setup.ts` 一致）。改跑哪些文件请编辑 **`common/run-scope.txt`**，或在本 job 的 `env` 设 **`E2E_SCOPE_FILE`** 指向其它路径。
+# GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */2 * * *` = 每 2 小时整点一次（0、2、4… 时 UTC 的 :00）。
+# 若单次 job 偶发超过 2 小时且 `cancel-in-progress: true`，下一触发可能取消上一跑；可改为 `false` 或再调稀 cron。
+#
+# `package.json` 的 postinstall 会执行 `playwright install chromium`（体积大、易拖长 Install）。
+# Playwright：若 runner 本机已有 `~/.cache/ms-playwright/chromium-*`，则 **跳过** `actions/cache` 的 restore，
+# 避免从 GitHub 拉回 ~700MB+；本机无则再走 Actions cache（命中则 restore，未命中则 postinstall 从 CDN 下）。
+# pnpm：**不**启用 `setup-node` 的 `cache: pnpm`（GitHub Actions 缓存 tarball，经代理常 0 B/s 卡住）。
+# GitHub 托管 runner：每 job 干净环境，Playwright 浏览器依赖本 workflow 的 `actions/cache` 或 postinstall 下载。
+# （若改回 self-hosted：同一用户下 `pnpm store` 常持久存在，`pnpm install` 更易复用本地 store。）
+name: Report (Vercel + Feishu) every 2 hours
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: report-vercel-feishu-scheduled
+  cancel-in-progress: true
+
+jobs:
+  report:
+    # E2E：`E2E_BASE_URL` 见 common/global-setup.ts（须为 runner 可访问的 URL；托管机用公网 beta 等）。
+    # 原 self-hosted（本机起被测、与 config.sh 标签一致时启用）：
+    # runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Detect local Playwright browser cache
+        id: pw_local
+        shell: bash
+        run: |
+          MS="${HOME}/.cache/ms-playwright"
+          if [[ -d "$MS" ]] && compgen -G "${MS}/chromium-*" > /dev/null; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+            echo "Local ~/.cache/ms-playwright has chromium-*; skip Actions cache restore."
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "No local chromium cache; will restore from Actions cache if available."
+          fi
+
+      - name: Restore Playwright browsers (Actions cache)
+        if: steps.pw_local.outputs.present != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: "true"
+
+      - name: Run scoped E2E (common/run-scope.txt), deploy Vercel, notify Feishu
+        # 仅需 `VERCEL_TOKEN`；被测 origin 来自 `global-setup.ts`。若飞书要与本 job 显式同步，可在此增加 `E2E_BASE_URL: https://beta.reaslab.io`（与改 global-setup 时一并维护）。
+        # **`reaslab-test` + `--exit-zero-on-e2e-failure`**：读取 **`common/run-scope.txt`** 决定跑哪些 `test/NN-*.test.ts`；E2E 失败时 job 仍可能绿（失败见报告与飞书）。
+        run: pnpm run reaslab-test -- --exit-zero-on-e2e-failure
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

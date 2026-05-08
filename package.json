@@ -1,0 +1,46 @@
+{
+  "name": "reaslab-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "playwright install chromium",
+
+    "test:01": "playwright test --config common/playwright.config.ts test/01-playground.test.ts",
+    "test:01:headed": "playwright test --config common/playwright.config.ts test/01-playground.test.ts --headed",
+    "test:02": "playwright test --config common/playwright.config.ts test/02-signup.test.ts",
+    "test:02:headed": "playwright test --config common/playwright.config.ts test/02-signup.test.ts --headed",
+    "test:03": "playwright test --config common/playwright.config.ts test/03-loginOut.test.ts",
+    "test:03:headed": "playwright test --config common/playwright.config.ts test/03-loginOut.test.ts --headed",
+    "test:04": "playwright test --config common/playwright.config.ts test/04-account-settings.test.ts",
+    "test:04:headed": "playwright test --config common/playwright.config.ts test/04-account-settings.test.ts --headed",
+    "test:05": "playwright test --config common/playwright.config.ts test/05-blankModeling.test.ts",
+    "test:05:headed": "playwright test --config common/playwright.config.ts test/05-blankModeling.test.ts --headed",
+    "test:06": "playwright test --config common/playwright.config.ts test/06-import-git.test.ts",
+    "test:06:headed": "playwright test --config common/playwright.config.ts test/06-import-git.test.ts --headed",
+    "test:07": "playwright test --config common/playwright.config.ts test/07-optimizationTemplateModeling.test.ts",
+    "test:07:headed": "playwright test --config common/playwright.config.ts test/07-optimizationTemplateModeling.test.ts --headed",
+    "test:08": "playwright test --config common/playwright.config.ts test/08-theoremTemplateMil.test.ts",
+    "test:08:headed": "playwright test --config common/playwright.config.ts test/08-theoremTemplateMil.test.ts --headed",
+    "test:09": "playwright test --config common/playwright.config.ts test/09-modelingContestTemplate.test.ts",
+    "test:09:headed": "playwright test --config common/playwright.config.ts test/09-modelingContestTemplate.test.ts --headed",
+    "test:10": "playwright test --config common/playwright.config.ts test/10-feedback.test.ts",
+    "test:10:headed": "playwright test --config common/playwright.config.ts test/10-feedback.test.ts --headed",
+    "test:11": "playwright test --config common/playwright.config.ts test/11-footer-links.test.ts",
+    "test:11:headed": "playwright test --config common/playwright.config.ts test/11-footer-links.test.ts --headed",
+    "test:12": "playwright test --config common/playwright.config.ts test/12-latex.test.ts",
+    "test:12:headed": "playwright test --config common/playwright.config.ts test/12-latex.test.ts --headed",
+    "test:13": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts",
+    "test:13:headed": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts --headed",
+
+    "reaslab-test": "node run.mjs --scope-file=common/run-scope.txt",
+
+    "report:feishu": "node send-results/send-feishu.mjs",
+    "vercel:login": "vercel login",
+    "report:vercel": "node send-results/send-vercel.mjs",
+    "report:vercel:feishu": "pnpm run reaslab-test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "vercel": "^51.4.0"
+  }
+}

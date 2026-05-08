@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+**/trace.zip
+common/.auth/*
+!common/.auth/.gitkeep
+test/data/.e2e-artifacts/
+.env
+.env.local
