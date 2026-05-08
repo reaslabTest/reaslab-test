@@ -1022,9 +1022,11 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     /** 折叠区内另有 **Provider** 区块的 **Save**；新增模型表单的 **Save** 在同区内偏后，取 **`.last()`**。 */
     await siliconCollapsible.getByRole("button", { name: "Save", exact: true }).last().click();
 
-    await expect(siliconCollapsible.getByRole("button", { name: /Add Model/i })).toBeVisible({
-      timeout: 120_000,
-    });
+    /**
+     * 内联 **`showAddInput`** 打开时 **「+ Add Model」** 会从 DOM 卸掉，**`getByRole(button, /Add Model/)` 恒为 0**；
+     * 保存成功后表单关闭再挂载按钮。断言 **占位表单消失** 比再等 **Add Model** 更符合 Playwright（稳定、语义即「保存完成」）。
+     */
+    await expect(siliconCollapsible.getByPlaceholder("e.g. deepseek-chat")).toBeHidden({ timeout: 120_000 });
   });
 
   await test.step("§7.7-3 User Rules：+ Add Rule → Always response in English → Save", async () => {
