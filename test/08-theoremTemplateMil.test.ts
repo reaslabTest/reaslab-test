@@ -57,7 +57,7 @@ test.describe("8. 模板创建定理证明项目", () => {
    * `docs/用户场景.md` 8.2：`MIL/C01_Introduction/S01_Getting_Started.lean`（或带 `solutions/` 的同款），
    * 工具栏眼睛为 **Toggle Lean Infoview**（`editor-toolbar`），右侧 **Lean Infoview** 中出现 `#eval` 输出即成功。
    */
-  test("8.2 S01_Getting_Started.lean 预览与 Lean Infoview", async ({ page }) => {
+  test("8.2 Lean Infoview", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
 
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });

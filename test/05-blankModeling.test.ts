@@ -180,7 +180,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(reasLingoInputHost.getByText(/\b4\b/).last()).toBeVisible({ timeout: 120_000 });
   });
 
-  test("5.4 切换Paper Copilot进行AI会话", async ({ page }) => {
+  test("5.4 切换 ReasLab Agent 进行 AI 会话", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
     await ensureReasLingoVisible(page);
 
@@ -193,20 +193,20 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await agentTrigger.first().click();
     const agentMenuPanel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
     await expect(agentMenuPanel).toBeVisible({ timeout: 10_000 });
-    const paperCopilot = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
-      hasText: /Paper Copilot/i,
+    const reasLabAgent = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
+      hasText: /ReasLab Agent/i,
     });
     await expect(
-      paperCopilot.first(),
+      reasLabAgent.first(),
       [
-        "§5.4：Agent 菜单中未找到「Paper Copilot」项（须在正式环境提供）。",
+        "§5.4：Agent 菜单中未找到「ReasLab Agent」项（须在正式环境提供）。",
         "若为菜单结构或展示名变更，请同步更新本用例的 locator / 文案匹配。",
       ].join(" "),
     ).toBeVisible({ timeout: 15_000 });
-    await paperCopilot.first().click();
+    await reasLabAgent.first().click();
     await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
 
-    // 与 §8.3 一致：图片/OCR 在 §5.3 已覆盖；此处仅验证 Paper Copilot 下纯文本对话与流式结束。
+    // 图片/OCR 在 §5.3 已覆盖；此处仅验证 ReasLab Agent 下纯文本对话与流式结束。
     const ta = reasLingoInputHost.locator("textarea").first();
     await expect(ta).toBeVisible({ timeout: 15_000 });
     await ta.click();
