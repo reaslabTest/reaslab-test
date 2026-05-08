@@ -677,6 +677,111 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
 }
 
 /**
+ * **`docs/用户场景.md` §8.5**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
+ * 流式结束后在侧栏正文中命中 **`status=Success`** 等 **`lake_build`** 成功摘要。
+ *
+ * @returns 无法回到 **Default**、或未见 **`lake_mcp:`** 用户气泡、或轮询未命中成功摘要时 **`false`**（**`test.skip`**）。
+ * 若含 **`MCP error`**、**`Build failed:`**、**`status=Error`** 等，**抛出**（**fail**）。
+ */
+export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promise<boolean> {
+  await ensureReasLingoVisible(page);
+  const host = page
+    .locator('[data-sidebar="group"]')
+    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .filter({ has: page.getByTitle("Add Context") })
+    .first();
+  await expect(host).toBeVisible({ timeout: 20_000 });
+
+  const trigger = host.getByRole("button", { name: /^Agent$/i }).or(host.locator('button[title="Switch Agent"]'));
+  await expect(trigger.first()).toBeVisible({ timeout: 15_000 });
+  await trigger.first().click();
+  const panel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+
+  const defaultItem = panel.locator('[data-slot="dropdown-menu-item"]').filter({ hasText: /^Default$/i });
+  if ((await defaultItem.count()) > 0) {
+    await defaultItem.first().click();
+  } else {
+    const selectedRow = panel
+      .locator('[data-slot="dropdown-menu-item"]')
+      .filter({ has: page.locator("svg.lucide-check") });
+    if ((await selectedRow.count()) > 0) {
+      await selectedRow.first().click();
+    } else {
+      await page.keyboard.press("Escape");
+    }
+  }
+  try {
+    await expect(panel).toBeHidden({ timeout: 5_000 });
+  } catch {
+    await page.keyboard.press("Escape");
+  }
+
+  const switchAgentBtn = host.locator('button[title="Switch Agent"]');
+  try {
+    await expect(switchAgentBtn.getByText(/^Agent$/)).toBeVisible({ timeout: 10_000 });
+  } catch {
+    return false;
+  }
+
+  const prompt = [
+    "lake_mcp: for this Lean/Lake workspace root, invoke the lake_build tool (full project build, no target).",
+    "Reply with ONE verbatim substring copied only from the MCP tool result (the summary line is best), e.g. containing status=Success.",
+  ].join(" ");
+
+  const ta = host.locator("textarea").first();
+  await expect(ta).toBeVisible({ timeout: 15_000 });
+  await ta.click();
+  await ta.fill(prompt);
+  const sendBtn = host.getByTitle("Send Message").first();
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await sendBtn.click();
+
+  try {
+    await expect(async () => {
+      await expect(page).toHaveURL(/\/projects\/[^/]+/i);
+      await expect(host.getByText(/^lake_mcp:/i).first()).toBeVisible();
+    }).toPass({ timeout: 60_000 });
+  } catch {
+    return false;
+  }
+
+  await waitForReasLingoAssistantReplyDone(page);
+
+  const body = ((await host.innerText()) ?? "").trim();
+  const lakeMcpHardFailure =
+    /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Build failed:|gRPC\s+error|\bstatus=Error\b|\bstatus=TimedOut\b|timed_out/i;
+  if (lakeMcpHardFailure.test(body)) {
+    throw new Error(
+      `§8.5 lake_mcp 调用失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
+    );
+  }
+
+  if (/I\s*'?m\s+sorry|cannot\s+assist/i.test(body) && !/\bstatus=Success\b|"status"\s*:\s*"success"/i.test(body)) {
+    return false;
+  }
+
+  const lakeMcpSuccessSignal = /\bstatus=Success\b|"status"\s*:\s*"success"/i;
+  try {
+    await expect
+      .poll(async () => lakeMcpSuccessSignal.test((await host.innerText()) ?? ""), {
+        timeout: 300_000,
+        intervals: [800, 2_000, 4_000, 8_000],
+      })
+      .toBeTruthy();
+  } catch {
+    return false;
+  }
+
+  const bodyAfter = (await host.innerText()) ?? "";
+  if (lakeMcpHardFailure.test(bodyAfter)) {
+    throw new Error(`§8.5 lake_mcp 在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
+  }
+
+  return true;
+}
+
+/**
  * `docs/用户场景.md` §7.5：**第二次**跑与 **§7.4** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**，与
  * **`readFirstPythonDataNameFromIdeFileTree`** / **`openFirstPythonFileRowInFileTree`** 一致）：侧栏 **ReasLingo**、
  * **保持默认 Agent**（不打开 Agent 菜单切换），经 **`python_mcp`** 在项目工作区内**按 `python <file>` 方式全量执行**
@@ -1121,6 +1226,10 @@ export const THEOREM_CH8_SKIP_MSG =
 /** `docs/用户场景.md` §8.4：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**Paper Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
   "§8.4 需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**Paper Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
+
+/** `docs/用户场景.md` §8.5：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
+export const THEOREM_CH8_LAKE_MCP_SKIP_MSG =
+  "§8.5 须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
 
 const OPT_TEMPLATE_IDE_SHELL_TIMEOUT_MS = 180_000;
 
