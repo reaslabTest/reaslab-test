@@ -919,7 +919,7 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
 
 /** `docs/用户场景.md` §7.7：**Models** 中未找到 **SiliconFlow** 或未展开时的 **`test.skip`** 说明。 */
 export const MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG =
-  "§7.7：ReasLingo Settings → Models 中未找到可展开的 SiliconFlow（或环境未展示该 Provider），跳过。";
+  "§7.7：ReasLingo Settings → Models 在加载完成或列表渲染后仍无可点的 SiliconFlow（或未展示该 Provider），跳过。";
 
 /** 与 **`docs/用户场景.md`** §7.7 步骤 3 一致（产品内展示文案）。 */
 export const CH7_SETTINGS_USER_RULE_TEXT = "Always response in English";
@@ -934,17 +934,20 @@ function reasLingoIdeSettingsInnerTablist(page: Page): Locator {
   });
 }
 
-/** 侧栏 **ReasLingo** 顶栏 **`title="Settings"`** → 打开编辑器虚拟页 **ReasLingo Settings**（`reaslingo://settings`）。 */
+/**
+ * 侧栏 **ReasLingo** **标题行**（**`ReasLingoHeader`**）里 **`title="Settings"`** 的齿轮 → 打开编辑器虚拟页 **ReasLingo Settings**（`reaslingo://settings`）。
+ * **勿**与输入条底部的 **`title="More Settings"`**（**`Sliders`**，**`ChatCommonSettingsSelector`**）混淆。
+ */
 export async function reasLingoOpenIdeAiSettings(page: Page): Promise<void> {
   await ensureReasLingoVisible(page);
   const sidebar = page
     .locator('[data-sidebar="group"]')
     .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .filter({ has: page.getByTitle("Add Context") })
     .first();
-  await expect(sidebar.getByRole("button", { name: "Settings", exact: true })).toBeVisible({
-    timeout: 15_000,
-  });
-  await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
+  const settingsBtn = sidebar.locator('button[title="Settings"]').first();
+  await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+  await settingsBtn.click();
   await expect(page.getByRole("tab", { name: "ReasLingo Settings" })).toBeVisible({ timeout: 30_000 });
   await expect(reasLingoIdeSettingsInnerTablist(page)).toBeVisible({ timeout: 20_000 });
 }
@@ -968,12 +971,23 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
   await reasLingoOpenIdeAiSettings(page);
   const innerTabs = reasLingoIdeSettingsInnerTablist(page);
 
-  await innerTabs.getByRole("tab", { name: "Models", exact: true }).click();
-  const modelsPanel = page.getByRole("tabpanel", { name: "Models", exact: true });
-  await expect(modelsPanel).toBeVisible({ timeout: 15_000 });
+  /** **`ReasLingoSettings`** 内层 **`TabsPrimitive.Root`**（`data-slot="tabs"`），比 **`role=tabpanel` + name** 更稳（**Base UI Tabs** 与 **keepMounted** 并存时）。 */
+  const settingsTabsRoot = page
+    .locator('[data-slot="tabs"]')
+    .filter({ has: page.getByRole("tab", { name: "Tools & MCP", exact: true }) })
+    .first();
+  await expect(settingsTabsRoot).toBeVisible({ timeout: 15_000 });
 
-  const sfTrigger = modelsPanel.getByRole("button", { name: /SiliconFlow/i }).first();
-  if ((await sfTrigger.count()) < 1) {
+  await innerTabs.getByRole("tab", { name: "Models", exact: true }).click();
+
+  /** `ProviderItem`：**`data-slot="collapsible-trigger"`**；等待 **`Loading models...`** 结束与列表渲染（一次 **`toBeVisible`** 覆盖）。 */
+  const sfTrigger = settingsTabsRoot
+    .locator('[data-slot="collapsible-trigger"]')
+    .filter({ hasText: /SiliconFlow/i })
+    .first();
+  try {
+    await expect(sfTrigger).toBeVisible({ timeout: 120_000 });
+  } catch {
     await reasLingoCloseIdeAiSettingsTab(page);
     return false;
   }
@@ -981,26 +995,36 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
   await test.step("§7.7-2 Models：SiliconFlow → Add Model → test / test → Save", async () => {
     await sfTrigger.click();
 
-    const openPanel = page
-      .locator('[data-state="open"]')
-      .filter({ has: page.getByRole("button", { name: /Add Model/i }) })
+    /**
+     * **`filter({ has: sfTrigger })`** 在部分 Playwright 版本下对 **`has`** 子定位解析不稳；**keepMounted** 时未激活 Tab 里也可能残留 SiliconFlow 文案。
+     * 改为 **`hasText: /SiliconFlow/` + `visible: true`**，并 **`scrollIntoViewIfNeeded`**（**`ScrollArea`** 内可能被裁切）。
+     */
+    const siliconCollapsible = settingsTabsRoot
+      .locator('[data-slot="collapsible"]')
+      .filter({ hasText: /SiliconFlow/i })
+      .filter({ visible: true })
       .first();
-    await expect(openPanel.getByPlaceholder("Enter API Key")).toBeVisible({ timeout: 20_000 });
-    await openPanel.getByPlaceholder("Enter API Key").fill("test");
+    await expect(siliconCollapsible).toBeVisible({ timeout: 15_000 });
 
-    await openPanel.getByRole("button", { name: /Add Model/i }).click();
+    const apiKeyInput = siliconCollapsible.locator('input[placeholder="Enter API Key"]');
+    await apiKeyInput.scrollIntoViewIfNeeded();
+    await expect(apiKeyInput).toBeVisible({ timeout: 30_000 });
+    await apiKeyInput.fill("test");
 
-    await openPanel.getByPlaceholder("e.g. deepseek-custom").fill("test");
-    await openPanel.getByPlaceholder("e.g. deepseek-chat").fill("test");
+    const addModelBtn = siliconCollapsible.getByRole("button", { name: /Add Model/i });
+    await addModelBtn.scrollIntoViewIfNeeded();
+    await expect(addModelBtn).toBeVisible({ timeout: 15_000 });
+    await addModelBtn.click();
 
-    const addBlock = openPanel
-      .locator("div")
-      .filter({ has: page.getByPlaceholder("e.g. deepseek-chat") })
-      .filter({ has: page.getByRole("button", { name: "Save", exact: true }) })
-      .first();
-    await addBlock.getByRole("button", { name: "Save", exact: true }).click();
+    await siliconCollapsible.getByPlaceholder("e.g. deepseek-custom").fill("test");
+    await siliconCollapsible.getByPlaceholder("e.g. deepseek-chat").fill("test");
 
-    await expect(openPanel.getByRole("button", { name: /Add Model/i })).toBeVisible({ timeout: 120_000 });
+    /** 折叠区内另有 **Provider** 区块的 **Save**；新增模型表单的 **Save** 在同区内偏后，取 **`.last()`**。 */
+    await siliconCollapsible.getByRole("button", { name: "Save", exact: true }).last().click();
+
+    await expect(siliconCollapsible.getByRole("button", { name: /Add Model/i })).toBeVisible({
+      timeout: 120_000,
+    });
   });
 
   await test.step("§7.7-3 User Rules：+ Add Rule → Always response in English → Save", async () => {
