@@ -84,10 +84,10 @@ test.describe("7. 模板创建优化建模项目", () => {
       .toBeGreaterThan(5);
   });
 
-  test("7.3 ReasLingo：Optimization Agent 与 who are you?", async ({ page }) => {
+  test("7.3 切换Optimization Agent并提问", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     const ok = await reasLingoWhoAreYouProbe(page, /Optimization/i);
-    test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 ReasLingo。");
+    test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 切换Optimization Agent并提问。");
   });
 
   /**
@@ -134,9 +134,9 @@ test.describe("7. 模板创建优化建模项目", () => {
    * 1. **Chat History**：`title="Chat History"` → 等待非 **Loading chat history…**
    * 2. 列表滚到底 → 点 **最后一条**会话（`≥2` 条；否则 **`test.skip`**）
    * 3. 发送 **`what question did I asked?`** → `waitForReasLingoAssistantReplyDone`
-   * 4. 侧栏正文含 **`who are you`**（与 §7.3 对齐）
+   * 4. 侧栏正文含 **`who are you`**（与 §7.3 切换Optimization Agent并提问 对齐）
    *
-   * 依赖同文件串行 **7.3 + 7.5** 产生多条会话。
+   * 依赖同文件串行 **7.3（切换Optimization Agent并提问）+ 7.5** 产生多条会话。
    */
   test("7.6 切换 AI 历史会话", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);

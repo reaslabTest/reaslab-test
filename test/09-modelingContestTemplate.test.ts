@@ -68,9 +68,9 @@ test.describe("9. 模板创建竞赛建模项目", () => {
       .toBeGreaterThan(5);
   });
 
-  test("9.3 ReasLingo：Math Modeling 与 who are you?", async ({ page }) => {
+  test("9.3 切换Math Modeling并提问", async ({ page }) => {
     test.skip(!(await tryEnterContestTemplateModelingIde(page)), MODELING_CH9_SKIP_MSG);
     const ok = await reasLingoWhoAreYouProbe(page, /Math Modeling/i);
-    test.skip(!ok, "当前环境无 Math Modeling Agent，跳过 9.3 ReasLingo。");
+    test.skip(!ok, "当前环境无 Math Modeling Agent，跳过 9.3 切换Math Modeling并提问。");
   });
 });

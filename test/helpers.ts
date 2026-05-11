@@ -554,7 +554,7 @@ export async function reasLingoWhoAreYouProbe(
 }
 
 /**
- * **`docs/用户场景.md` §8.4**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
+ * **`docs/用户场景.md` §8.4（调用lean_mcp）**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
  * **Paper Copilot** 等 Agent **不含** **`lean_mcp`**，与 **`builtin_llm_and_agents.sql`** 一致），对已聚焦的 **Lean** 叶文件发 **`lean_mcp:`** 探针，
  * 等待流式结束并断言侧栏正文出现 **Infoview / goals** 或 **`Hello, World!`** 等工具输出线索。
  *
@@ -642,7 +642,7 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
     /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Failed to get Lean infoview|Failed to restart Lean file|gRPC\s+error/i;
   if (leanMcpHardFailure.test(body)) {
     throw new Error(
-      `§8.4 lean_mcp 调用失败（侧栏含 MCP/gRPC 错误），不应判为通过。节选：${body.slice(-2_000)}`,
+      `§8.4（调用lean_mcp）失败（侧栏含 MCP/gRPC 错误），不应判为通过。节选：${body.slice(-2_000)}`,
     );
   }
 
@@ -670,14 +670,14 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
 
   const bodyAfter = (await host.innerText()) ?? "";
   if (leanMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.4 lean_mcp 在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_000)}`);
+    throw new Error(`§8.4（调用lean_mcp）在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_000)}`);
   }
 
   return true;
 }
 
 /**
- * **`docs/用户场景.md` §8.5**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
+ * **`docs/用户场景.md` §8.5（调用lake_mcp）**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
  * 流式结束后在侧栏正文中命中 **`status=Success`** 等 **`lake_build`** 成功摘要。
  *
  * @returns 无法回到 **Default**、或未见 **`lake_mcp:`** 用户气泡、或轮询未命中成功摘要时 **`false`**（**`test.skip`**）。
@@ -753,7 +753,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
     /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Build failed:|gRPC\s+error|\bstatus=Error\b|\bstatus=TimedOut\b|timed_out/i;
   if (lakeMcpHardFailure.test(body)) {
     throw new Error(
-      `§8.5 lake_mcp 调用失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
+      `§8.5（调用lake_mcp）失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
     );
   }
 
@@ -775,7 +775,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
 
   const bodyAfter = (await host.innerText()) ?? "";
   if (lakeMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.5 lake_mcp 在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
+    throw new Error(`§8.5（调用lake_mcp）在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
   }
 
   return true;
@@ -823,12 +823,12 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
     .toBeTruthy();
 }
 
-/** `docs/用户场景.md` §12.2 步骤 3：发给模型的用户消息须为英文。 */
+/** `docs/用户场景.md` §12.2（调用tex_mcp）步骤 3：发给模型的用户消息须为英文。 */
 export const CH12_2_TEX_MCP_USER_PROMPT =
   "Use compile_tex to compile test_upload.tex (path relative to the project root). Then call get_compile_log. In your reply, quote the key lines from that log that pertain to this compilation run." as const;
 
 /**
- * `docs/用户场景.md` §12.2：侧栏 **ReasLingo** 保证为 **Default** Agent（见 **`AgentSelector.tsx`**：`currentAgent === "default"` 时触发器文案为 **Agent**，且 **Default** 不出现在下拉列表中）→ **New Chat** → 发送 **`CH12_2_TEX_MCP_USER_PROMPT`**，
+ * `docs/用户场景.md` §12.2（调用tex_mcp）：侧栏 **ReasLingo** 保证为 **Default** Agent（见 **`AgentSelector.tsx`**：`currentAgent === "default"` 时触发器文案为 **Agent**，且 **Default** 不出现在下拉列表中）→ **New Chat** → 发送 **`CH12_2_TEX_MCP_USER_PROMPT`**，
  * 流结束后断言 **`compile_tex`** 与 **`get_compile_log`** 在侧栏正文中的出现顺序，并断言编译 log 常见片段（与 **`test_upload.tex`** 成功编译一致）。
  *
  * **前提**：工程根目录已存在 **`test_upload.tex`**（由 **`uploadSingleFileViaExploreUploadDialog`** 等写入）。
@@ -868,7 +868,7 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
       } else {
         await page.keyboard.press("Escape");
         throw new Error(
-          "ReasLingo 无法切回 Default：下拉中无「Default」项且无带勾选图标的当前 Agent 行（与 §8.4 策略一致）。",
+          "ReasLingo 无法切回 Default：下拉中无「Default」项且无带勾选图标的当前 Agent 行（与 §8.4（调用lean_mcp）策略一致）。",
         );
       }
     }
@@ -935,13 +935,13 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
 /** `docs/用户场景.md` §7.6：与文档一致的英文召回句（口语拼写）。 */
 export const CH7_HISTORY_RECALL_PROMPT = "what question did I asked?";
 
-/** §7.6：串行主线在 **§7.3** 跳过等情况下历史不足两条时的 **`test.skip`** 说明。 */
+/** §7.6：串行主线在 **§7.3（切换Optimization Agent并提问）** 跳过等情况下历史不足两条时的 **`test.skip`** 说明。 */
 export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
-  "§7.6 需要至少 2 条 ReasLingo 历史会话（主线含 §7.3「who are you」与 §7.5「python_mcp」）；当前列表不足。";
+  "§7.6 需要至少 2 条 ReasLingo 历史会话（主线含 §7.3「切换Optimization Agent并提问」与 §7.5「python_mcp」）；当前列表不足。";
 
 /**
  * **`docs/用户场景.md` §7.6**：**Chat History** → 列表滚到底 → 点**最后一条会话** → 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
- * 流结束后侧栏正文含 **`who are you`**（与 **§7.3** 对齐）。
+ * 流结束后侧栏正文含 **`who are you`**（与 **§7.3（切换Optimization Agent并提问）** 用户消息对齐）。
  *
  * **会话行定位**：`reaslab-iipe` 的 **`SessionItem`** 为原生 **`<button type="button">`**；**`zlj`** 等为 **`div role="button"`**。
  * 须用 **`getByRole("button", { name: /\d+\s+messages/ })`**，**勿**用 **`div[role="button"]`**（在 iipe 上会恒为 **0** 条 → 误判「不足两条」而 **`test.skip`**）。
@@ -1010,7 +1010,7 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
     await waitForReasLingoAssistantReplyDone(page);
   });
 
-  await test.step("§7.6-4：验收助理正文含 who are you（与 §7.3 一致）", async () => {
+  await test.step("§7.6-4：验收助理正文含 who are you（与 §7.3 切换Optimization Agent并提问 一致）", async () => {
     await expect
       .poll(async () => /who\s+are\s+you/i.test((await host.innerText()) ?? ""), {
         timeout: 120_000,
@@ -1224,13 +1224,13 @@ export const MODELING_CH9_SKIP_MSG =
 export const THEOREM_CH8_SKIP_MSG =
   "无法进入 MIL 定理证明 IDE：请确认已登录且 Theorem Proving Templates → Mathematics in Lean → Use Template 可用（首次 lake 可能极慢），或 test/data/.e2e-artifacts/theorem-project-uuid.txt 仍有效。";
 
-/** `docs/用户场景.md` §8.4：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**Paper Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
+/** `docs/用户场景.md` §8.4（调用lean_mcp）：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**Paper Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
-  "§8.4 需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**Paper Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
+  "§8.4（调用lean_mcp）需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**Paper Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
 
-/** `docs/用户场景.md` §8.5：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
+/** `docs/用户场景.md` §8.5（调用lake_mcp）：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
 export const THEOREM_CH8_LAKE_MCP_SKIP_MSG =
-  "§8.5 须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
+  "§8.5（调用lake_mcp）须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
 
 const OPT_TEMPLATE_IDE_SHELL_TIMEOUT_MS = 180_000;
 
