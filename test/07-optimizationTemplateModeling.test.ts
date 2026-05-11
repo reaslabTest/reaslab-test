@@ -122,7 +122,7 @@ test.describe("7. 模板创建优化建模项目", () => {
    * **`docs/用户场景.md`** §7.5：与 **§7.4** 同一主脚本；**默认 Agent** 下 **第二次**全量执行：**`python_mcp`**
    *（**第一次**为 **§7.4** **Run Python**；`describe` 串行）。
    */
-  test("7.5 使用 MCP 执行 Python（python_mcp）", async ({ page }) => {
+  test("7.5 调用python_mcp", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     const pyDataName = await readFirstPythonDataNameFromIdeFileTree(page);
@@ -136,7 +136,7 @@ test.describe("7. 模板创建优化建模项目", () => {
    * 3. 发送 **`what question did I asked?`** → `waitForReasLingoAssistantReplyDone`
    * 4. 侧栏正文含 **`who are you`**（与 §7.3 切换Optimization Agent并提问 对齐）
    *
-   * 依赖同文件串行 **7.3（切换Optimization Agent并提问）+ 7.5** 产生多条会话。
+   * 依赖同文件串行 **7.3（切换Optimization Agent并提问）+ 7.5 调用python_mcp** 产生多条会话。
    */
   test("7.6 切换 AI 历史会话", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);

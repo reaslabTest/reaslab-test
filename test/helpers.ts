@@ -1523,7 +1523,7 @@ export async function openFirstPythonFileRowInFileTree(page: Page): Promise<void
 }
 
 /**
- * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.5** MCP 与 **§7.4** 指向同一脚本。
+ * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.5** **`python_mcp`** 与 **§7.4** 指向同一脚本。
  */
 export async function readFirstPythonDataNameFromIdeFileTree(page: Page): Promise<string> {
   const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
