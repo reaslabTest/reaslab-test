@@ -554,6 +554,34 @@ export async function reasLingoWhoAreYouProbe(
 }
 
 /**
+ * **`docs/用户场景.md` §9.4**：侧栏 **ReasLingo** 标题栏 **`title="Standalone Chat Mode"`**（**`ReasLingoHeader.tsx`**）→
+ * 断言 **`[data-standalone-chat]`**（**`StandaloneChatView`** Portal）内 **History**、**Search conversations…**、**Add Context**；
+ * 桌面默认右侧 **Activity** 面板；并断言 **`title="Switch to IDE Mode"`** 可见（**不点击**），以便用例结束时页面仍处全屏、报告截图为全屏态。
+ *
+ * @returns 未找到全屏入口或全屏层未挂载时返回 **`false`**（调用方 **`test.skip`**）。
+ */
+export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promise<boolean> {
+  await ensureReasLingoVisible(page);
+  const enter = page.getByTitle("Standalone Chat Mode").first();
+  if ((await enter.count()) < 1 || !(await enter.isVisible().catch(() => false))) {
+    return false;
+  }
+  await enter.click();
+  const shell = page.locator("[data-standalone-chat]").first();
+  try {
+    await expect(shell).toBeVisible({ timeout: 25_000 });
+  } catch {
+    return false;
+  }
+  await expect(shell.getByText("History", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(shell.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 15_000 });
+  await expect(shell.getByTitle("Add Context").first()).toBeVisible({ timeout: 15_000 });
+  await expect(shell.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(shell.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
+  return true;
+}
+
+/**
  * **`docs/用户场景.md` §8.5（调用lean_mcp）**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
  * **Paper Copilot** 等 Agent **不含** **`lean_mcp`**，与 **`builtin_llm_and_agents.sql`** 一致），对已聚焦的 **Lean** 叶文件发 **`lean_mcp:`** 探针，
  * 等待流式结束并断言侧栏正文出现 **Infoview / goals** 或 **`Hello, World!`** 等工具输出线索。
@@ -1219,6 +1247,10 @@ export const MODELING_PYTHON_CONSOLE_GUROBI_SKIP_MSG =
 /** `docs/用户场景.md` §9「模板创建竞赛建模项目」：从「Math Modeling Contest Templates」创建项目失败时的跳过说明。 */
 export const MODELING_CH9_SKIP_MSG =
   "无法从数学建模竞赛模板进入建模 IDE：请确认已登录、竞赛模板服务可用，或 test/data/.e2e-artifacts/modeling-contest-template-project-uuid.txt 仍有效。";
+
+/** `docs/用户场景.md` §9.4：未出现 **Standalone Chat Mode** 入口或 **`[data-standalone-chat]`** 全屏层未挂载时的 **`test.skip`** 说明（窄屏/移动布局可能隐藏入口）。 */
+export const MODELING_CH9_STANDALONE_CHAT_SKIP_MSG =
+  "§9.4 全屏 AI 会话：侧栏未找到 **Standalone Chat Mode** 或全屏层未挂载；若为移动视口请用桌面宽度重跑。";
 
 /** `docs/用户场景.md` §8「模板创建定理证明项目」：MIL 定理证明模板 IDE 不可用时的跳过说明（与 `tryEnterLeanProjectIde` / `theorem-project-uuid.txt` 一致）。 */
 export const THEOREM_CH8_SKIP_MSG =

@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import {
   MODELING_CH9_SKIP_MSG,
+  MODELING_CH9_STANDALONE_CHAT_SKIP_MSG,
   openLeafFile,
+  reasLingoStandaloneChatFullScreenProbe,
   reasLingoWhoAreYouProbe,
   tryEnterContestTemplateModelingIde,
 } from "./helpers";
@@ -72,5 +74,15 @@ test.describe("9. 模板创建竞赛建模项目", () => {
     test.skip(!(await tryEnterContestTemplateModelingIde(page)), MODELING_CH9_SKIP_MSG);
     const ok = await reasLingoWhoAreYouProbe(page, /Math Modeling/i);
     test.skip(!ok, "当前环境无 Math Modeling Agent，跳过 9.3 切换Math Modeling并提问。");
+  });
+
+  /**
+   * `docs/用户场景.md` §9.4：**Standalone Chat Mode** → **`[data-standalone-chat]`** 内关键 UI；**不**点 **Switch to IDE Mode**，
+   * 用例以全屏态结束（报告截图为全屏）。与 **`ReasLingoHeader.tsx`** / **`StandaloneChatView.tsx`** 对齐。
+   */
+  test("9.4 全屏AI会话", async ({ page }) => {
+    test.skip(!(await tryEnterContestTemplateModelingIde(page)), MODELING_CH9_SKIP_MSG);
+    const ok = await reasLingoStandaloneChatFullScreenProbe(page);
+    test.skip(!ok, MODELING_CH9_STANDALONE_CHAT_SKIP_MSG);
   });
 });
