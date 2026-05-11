@@ -554,7 +554,7 @@ export async function reasLingoWhoAreYouProbe(
 }
 
 /**
- * **`docs/用户场景.md` §8.4（调用lean_mcp）**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
+ * **`docs/用户场景.md` §8.5（调用lean_mcp）**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
  * **Paper Copilot** 等 Agent **不含** **`lean_mcp`**，与 **`builtin_llm_and_agents.sql`** 一致），对已聚焦的 **Lean** 叶文件发 **`lean_mcp:`** 探针，
  * 等待流式结束并断言侧栏正文出现 **Infoview / goals** 或 **`Hello, World!`** 等工具输出线索。
  *
@@ -642,7 +642,7 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
     /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Failed to get Lean infoview|Failed to restart Lean file|gRPC\s+error/i;
   if (leanMcpHardFailure.test(body)) {
     throw new Error(
-      `§8.4（调用lean_mcp）失败（侧栏含 MCP/gRPC 错误），不应判为通过。节选：${body.slice(-2_000)}`,
+      `§8.5（调用lean_mcp）失败（侧栏含 MCP/gRPC 错误），不应判为通过。节选：${body.slice(-2_000)}`,
     );
   }
 
@@ -670,14 +670,14 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
 
   const bodyAfter = (await host.innerText()) ?? "";
   if (leanMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.4（调用lean_mcp）在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_000)}`);
+    throw new Error(`§8.5（调用lean_mcp）在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_000)}`);
   }
 
   return true;
 }
 
 /**
- * **`docs/用户场景.md` §8.5（调用lake_mcp）**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
+ * **`docs/用户场景.md` §8.6（调用lake_mcp）**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
  * 流式结束后在侧栏正文中命中 **`status=Success`** 等 **`lake_build`** 成功摘要。
  *
  * @returns 无法回到 **Default**、或未见 **`lake_mcp:`** 用户气泡、或轮询未命中成功摘要时 **`false`**（**`test.skip`**）。
@@ -753,7 +753,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
     /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Build failed:|gRPC\s+error|\bstatus=Error\b|\bstatus=TimedOut\b|timed_out/i;
   if (lakeMcpHardFailure.test(body)) {
     throw new Error(
-      `§8.5（调用lake_mcp）失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
+      `§8.6（调用lake_mcp）失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
     );
   }
 
@@ -775,7 +775,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
 
   const bodyAfter = (await host.innerText()) ?? "";
   if (lakeMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.5（调用lake_mcp）在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
+    throw new Error(`§8.6（调用lake_mcp）在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
   }
 
   return true;
@@ -868,7 +868,7 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
       } else {
         await page.keyboard.press("Escape");
         throw new Error(
-          "ReasLingo 无法切回 Default：下拉中无「Default」项且无带勾选图标的当前 Agent 行（与 §8.4（调用lean_mcp）策略一致）。",
+          "ReasLingo 无法切回 Default：下拉中无「Default」项且无带勾选图标的当前 Agent 行（与 §8.5（调用lean_mcp）策略一致）。",
         );
       }
     }
@@ -1224,13 +1224,94 @@ export const MODELING_CH9_SKIP_MSG =
 export const THEOREM_CH8_SKIP_MSG =
   "无法进入 MIL 定理证明 IDE：请确认已登录且 Theorem Proving Templates → Mathematics in Lean → Use Template 可用（首次 lake 可能极慢），或 test/data/.e2e-artifacts/theorem-project-uuid.txt 仍有效。";
 
-/** `docs/用户场景.md` §8.4（调用lean_mcp）：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**Paper Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
+/** `docs/用户场景.md` §8.5（调用lean_mcp）：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**Paper Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
-  "§8.4（调用lean_mcp）需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**Paper Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
+  "§8.5（调用lean_mcp）需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**Paper Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
 
-/** `docs/用户场景.md` §8.5（调用lake_mcp）：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
+/** `docs/用户场景.md` §8.6（调用lake_mcp）：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
 export const THEOREM_CH8_LAKE_MCP_SKIP_MSG =
-  "§8.5（调用lake_mcp）须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
+  "§8.6（调用lake_mcp）须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
+
+/** `docs/用户场景.md` §8.3（语义搜索及Lean搜索）：**Semantic** gRPC / **`lean_search`** 不可用或探针未命中时的 **`test.skip`** 说明。 */
+export const THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG =
+  "§8.3 语义搜索及 Lean 搜索：Semantic 定理搜索或 **`lean_search`** 报错/超时（常见未配置 **`TheoremSemanticSearchService`** 或工具链）；见左侧 **`Semantic Search`**。";
+
+/**
+ * **`docs/用户场景.md` §8.3**：左侧 **`title="Semantic Search"`** → **Semantic** 子标签：**`normed space`** + **Search**；
+ * **Lean** 子标签：**`Real`** + **Search**。出现 **Error** 卡片或轮询超时则返回 **`false`**。
+ */
+export async function milSemanticSearchAndLeanToolbarProbe(page: Page): Promise<boolean> {
+  await page.getByTitle("Semantic Search").click();
+
+  const semanticShell = page
+    .locator("div.flex.size-full.flex-col")
+    .filter({ has: page.getByPlaceholder("Enter your query") })
+    .first();
+  await expect(semanticShell.getByPlaceholder("Enter your query")).toBeVisible({ timeout: 20_000 });
+  await semanticShell.getByPlaceholder("Enter your query").fill("normed space");
+  await semanticShell.getByRole("button", { name: "Search", exact: true }).click();
+
+  const semanticScroll = semanticShell.locator(".min-h-0.flex-1.overflow-auto").first();
+  try {
+    await expect
+      .poll(
+        async () => {
+          const err = await semanticScroll.locator("h4").filter({ hasText: /^Error$/ }).isVisible().catch(() => false);
+          if (err) {
+            return false;
+          }
+          const cards = await page.locator(".semantic-search section").count();
+          const empty = await semanticScroll.getByText(/No results found/i).count();
+          return cards > 0 || empty > 0;
+        },
+        { timeout: 120_000, intervals: [600, 1_500, 3_000] },
+      )
+      .toBeTruthy();
+  } catch {
+    return false;
+  }
+
+  if (await semanticScroll.locator("h4").filter({ hasText: /^Error$/ }).isVisible().catch(() => false)) {
+    return false;
+  }
+
+  await page.getByRole("button", { name: "Lean", exact: true }).click();
+  const leanShell = page
+    .locator("div.flex.size-full.flex-col")
+    .filter({ has: page.getByPlaceholder(/Search lemmas, theorems, definitions/i) })
+    .first();
+  await expect(leanShell.getByPlaceholder(/Search lemmas, theorems, definitions/i)).toBeVisible({
+    timeout: 15_000,
+  });
+  await leanShell.getByPlaceholder(/Search lemmas, theorems, definitions/i).fill("Real");
+  await leanShell.getByRole("button", { name: "Search", exact: true }).click();
+
+  const leanScroll = leanShell.locator(".min-h-0.flex-1.overflow-auto").first();
+  try {
+    await expect
+      .poll(
+        async () => {
+          const err = await leanScroll.locator("h4").filter({ hasText: /^Error$/ }).isVisible().catch(() => false);
+          if (err) {
+            return false;
+          }
+          const empty = await leanScroll.getByText(/No results found/i).count();
+          const hit = await leanScroll.locator("section").filter({ has: page.locator("h3") }).count();
+          return empty > 0 || hit > 0;
+        },
+        { timeout: 120_000, intervals: [600, 1_500, 3_000] },
+      )
+      .toBeTruthy();
+  } catch {
+    return false;
+  }
+
+  if (await leanScroll.locator("h4").filter({ hasText: /^Error$/ }).isVisible().catch(() => false)) {
+    return false;
+  }
+
+  return true;
+}
 
 const OPT_TEMPLATE_IDE_SHELL_TIMEOUT_MS = 180_000;
 

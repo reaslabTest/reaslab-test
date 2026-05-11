@@ -4,7 +4,9 @@ import {
   MIL_GETTING_STARTED_SEGMENTS,
   THEOREM_CH8_LAKE_MCP_SKIP_MSG,
   THEOREM_CH8_LEAN_MCP_SKIP_MSG,
+  THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG,
   THEOREM_CH8_SKIP_MSG,
+  milSemanticSearchAndLeanToolbarProbe,
   openLeafFile,
   reasLingoDefaultAgentLakeMcpBuildProbe,
   reasLingoDefaultAgentLeanMcpInfoviewProbe,
@@ -80,17 +82,27 @@ test.describe("8. 模板创建定理证明项目", () => {
     await expect(infoview.getByText(/Hello,\s*World!/i).first()).toBeVisible({ timeout: 180_000 });
   });
 
-  test("8.3 切换Paper Copilot 并提问", async ({ page }) => {
+  /**
+   * **`docs/用户场景.md`** §8.3：左侧 **Semantic Search** → **Semantic**（**`normed space`**）与 **Lean**（**`Real`**），与 **`search-group.tsx`** / **`semantic-search.tsx`** / **`lean-search-panel.tsx`** 对齐。
+   */
+  test("8.3 语义搜索及Lean搜索", async ({ page }) => {
+    test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
+    await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
+    const ok = await milSemanticSearchAndLeanToolbarProbe(page);
+    test.skip(!ok, THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG);
+  });
+
+  test("8.4 切换Paper Copilot 并提问", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
     const ok = await reasLingoWhoAreYouProbe(page, /Paper Copilot/i);
-    test.skip(!ok, "当前环境无 Paper Copilot Agent，跳过 8.3 切换Paper Copilot 并提问。");
+    test.skip(!ok, "当前环境无 Paper Copilot Agent，跳过 8.4 切换Paper Copilot 并提问。");
   });
 
   /**
-   * **`docs/用户场景.md`** §8.4（调用lean_mcp）：在 **§8.2** 同款 **`S01_Getting_Started.lean`** 已打开的前提下，将 Agent 切回 **Default**，
+   * **`docs/用户场景.md`** §8.5（调用lean_mcp）：在 **§8.2** 同款 **`S01_Getting_Started.lean`** 已打开的前提下，将 Agent 切回 **Default**，
    * 探针写明 **`MIL/C01_Introduction/...`** 与首行 **`#eval "Hello, World!"`**（与模板一致，**非** **`IO.println`**），经 **`lean_mcp`** 查 **Infoview / goals**。
    */
-  test("8.4 调用lean_mcp", async ({ page }) => {
+  test("8.5 调用lean_mcp", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     await openMilGettingStartedLean(page);
@@ -101,9 +113,9 @@ test.describe("8. 模板创建定理证明项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §8.5（调用lake_mcp）：**Default** + **`lake_mcp:`** 触发 **`lake_build`**，助理侧须含 **`status=Success`** 等摘要（与 **`lsp-proxy-lean`** **`lake_build_tool`** 返回一致）。
+   * **`docs/用户场景.md`** §8.6（调用lake_mcp）：**Default** + **`lake_mcp:`** 触发 **`lake_build`**，助理侧须含 **`status=Success`** 等摘要（与 **`lsp-proxy-lean`** **`lake_build_tool`** 返回一致）。
    */
-  test("8.5 调用lake_mcp", async ({ page }) => {
+  test("8.6 调用lake_mcp", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
