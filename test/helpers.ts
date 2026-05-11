@@ -1165,11 +1165,12 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     });
   });
 
-  await test.step("§7.7-4 Tools & MCP：Installed MCP Servers ×4", async () => {
+  await test.step("§7.7-4 Tools & MCP：MCP Servers ×4", async () => {
     await innerTabs.getByRole("tab", { name: "Tools & MCP", exact: true }).click();
     const toolsPanel = page.getByRole("tabpanel", { name: "Tools & MCP", exact: true });
     await expect(toolsPanel).toBeVisible({ timeout: 15_000 });
-    await expect(toolsPanel.getByRole("heading", { name: "Installed MCP Servers", exact: true })).toBeVisible({
+    /** 线上标题为 **MCP Servers**（非历史文案 *Installed MCP Servers*）。 */
+    await expect(toolsPanel.getByRole("heading", { name: "MCP Servers", exact: true })).toBeVisible({
       timeout: 15_000,
     });
     for (const id of ["python_mcp", "tex_mcp", "lean_mcp", "lake_mcp"] as const) {
