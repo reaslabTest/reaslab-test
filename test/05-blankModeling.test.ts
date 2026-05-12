@@ -205,6 +205,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     ).toBeVisible({ timeout: 15_000 });
     await reasLabAgent.first().click();
     await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
+    await page.waitForTimeout(2_000);
 
     // 图片/OCR 在 §5.3 已覆盖；此处仅验证 ReasLab Agent 下纯文本对话与流式结束。
     const ta = reasLingoInputHost.locator("textarea").first();

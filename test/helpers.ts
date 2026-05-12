@@ -507,7 +507,7 @@ export async function waitForReasLingoAssistantReplyDone(page: Page): Promise<vo
 
 /**
  * `docs/用户场景.md` §6～§9：侧栏 ReasLingo，发送 **`who are you?`**，并等待本轮助理输出结束（与 `waitForReasLingoAssistantReplyDone` 一致）。
- * `agentMenuLabel` 为 **`null`** 时不打开 Agent 菜单（保持默认 Agent）；否则在 **Agent / Switch Agent** 触发器菜单中选首条匹配项。
+ * `agentMenuLabel` 为 **`null`** 时不打开 Agent 菜单（保持默认 Agent）；否则在 **Agent / Switch Agent** 触发器菜单中选首条匹配项，菜单关闭后 **固定等待 2s** 再输入 **`who are you?`**。
  *
  * @returns 若指定了 `agentMenuLabel` 但菜单中无匹配项，返回 **`false`**（调用方宜 `test.skip`）；否则返回 **`true`**。
  */
@@ -536,6 +536,8 @@ export async function reasLingoWhoAreYouProbe(
     }
     await item.first().click();
     await expect(panel).toBeHidden({ timeout: 5_000 });
+    // 切换 Agent 后给前端/会话态一短窗再输入，避免偶发抢在 UI 未就绪时填问句。
+    await page.waitForTimeout(2_000);
   }
 
   const ta = host.locator("textarea").first();
