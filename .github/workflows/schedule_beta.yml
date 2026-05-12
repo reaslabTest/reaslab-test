@@ -9,7 +9,7 @@
 # pnpm：**不**启用 `setup-node` 的 `cache: pnpm`（GitHub Actions 缓存 tarball，经代理常 0 B/s 卡住）。
 # GitHub 托管 runner：每 job 干净环境，Playwright 浏览器依赖本 workflow 的 `actions/cache` 或 postinstall 下载。
 # （若改回 self-hosted：同一用户下 `pnpm store` 常持久存在，`pnpm install` 更易复用本地 store。）
-name: "Scheduled: E2E + Vercel + Feishu (3h UTC)"
+name: "beta: E2E + Vercel + Feishu (3h UTC)"
 
 on:
   schedule:
