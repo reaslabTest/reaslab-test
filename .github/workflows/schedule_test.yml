@@ -2,7 +2,7 @@
 # 与 **`schedule_beta.yml`** 使用不同 **`concurrency.group`**，避免并行时互相 **cancel-in-progress**。
 # 若需测其它 origin：直接改下方 **`E2E_BASE_URL`** 字面量；Cloudflare 头与 **`global-setup.ts`** 默认不一致时再增加 **`E2E_CF_TESTING_AUTH`** 行。
 # `schedule` 仅默认分支生效；与 A 同 cron 时可并行两 job。
-name: Report Site B (partial scope + Vercel + Feishu)
+name: "Scheduled: E2E + Vercel + Feishu (3h UTC)"
 
 on:
   schedule:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: report-site-b
+  group: report-test
   cancel-in-progress: true
 
 jobs:
