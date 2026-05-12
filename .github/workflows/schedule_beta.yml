@@ -1,6 +1,7 @@
-# 每 2 小时执行（UTC）：按 **`common/run-scope.txt`** 列出的章节号跑 E2E（`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** `--scope-file=common/run-scope.txt` + `--exit-zero-on-e2e-failure`，例如 `01`→`01-playground.test.ts`、`05`→`05-blankModeling.test.ts`）→ 部署 `playwright-report` 到 Vercel → 飞书（卡片底部「打开报告」链接；正文「被测网站」由 **send-feishu.mjs** 读取 **`E2E_BASE_URL`**，未设置时默认 **beta**，与 `common/global-setup.ts` 一致）。改跑哪些文件请编辑 **`common/run-scope.txt`**，或在本 job 的 `env` 设 **`E2E_SCOPE_FILE`** 指向其它路径。
-# GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */2 * * *` = 每 2 小时整点一次（0、2、4… 时 UTC 的 :00）。
-# 若单次 job 偶发超过 2 小时且 `cancel-in-progress: true`，下一触发可能取消上一跑；可改为 `false` 或再调稀 cron。
+# 站点 A（全量 scope）：**`common/run-scope-beta.txt`**。子集与 **`schedule_test.yml`** 配对；**`E2E_BASE_URL`** 在本文件 **`env`** 写死（换站请改字面量）。
+# 每 3 小时执行（UTC）：`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** + **`common/run-scope-beta.txt`** → Vercel 报告 → 飞书（**`E2E_BASE_URL`** 见本 job **`env`** / **`common/global-setup.ts`**）。
+# GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */3 * * *` = 每 3 小时整点一次（0、3、6… 时 UTC 的 :00）。
+# 若单次 job 偶发超过定时间隔且 `cancel-in-progress: true`，下一触发可能取消上一跑；可改为 `false` 或再调稀 cron。
 #
 # `package.json` 的 postinstall 会执行 `playwright install chromium`（体积大、易拖长 Install）。
 # Playwright：若 runner 本机已有 `~/.cache/ms-playwright/chromium-*`，则 **跳过** `actions/cache` 的 restore，
@@ -12,11 +13,11 @@ name: Report (Vercel + Feishu) every 2 hours
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 */3 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: report-vercel-feishu-scheduled
+  group: report-site-a-full
   cancel-in-progress: true
 
 jobs:
@@ -64,9 +65,10 @@ jobs:
         env:
           CI: "true"
 
-      - name: Run scoped E2E (common/run-scope.txt), deploy Vercel, notify Feishu
-        # 仅需 `VERCEL_TOKEN`；被测 origin 来自 `global-setup.ts`。若飞书要与本 job 显式同步，可在此增加 `E2E_BASE_URL: https://beta.reaslab.io`（与改 global-setup 时一并维护）。
-        # **`reaslab-test` + `--exit-zero-on-e2e-failure`**：读取 **`common/run-scope.txt`** 决定跑哪些 `test/NN-*.test.ts`；E2E 失败时 job 仍可能绿（失败见报告与飞书）。
+      - name: Run scoped E2E (common/run-scope-beta.txt), deploy Vercel, notify Feishu
+        # 需 `VERCEL_TOKEN`；被测 origin 由下方 **`E2E_BASE_URL`** 注入（与 **`global-setup.ts`** 读取一致；换站改本 yml 字面量）。
+        # **`reaslab-test` + `--exit-zero-on-e2e-failure`**：读取 **`common/run-scope-beta.txt`** 决定跑哪些 `test/NN-*.test.ts`；E2E 失败时 job 仍可能绿（失败见报告与飞书）。
         run: pnpm run reaslab-test -- --exit-zero-on-e2e-failure
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          E2E_BASE_URL: https://beta.reaslab.io

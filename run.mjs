@@ -3,8 +3,8 @@
  * 完整链路：`pnpm run <e2e 脚本>` 或 **`--scope-file=…`** 指定章节子集 → `send-results/send-vercel.mjs` → `send-results/send-feishu.mjs`。
  * **用例失败时仍会部署报告并通知飞书**，便于查看 HTML 报告与摘要；默认进程退出码仍反映测试是否通过（供 CI 标红）。
  * 若传入 **`--exit-zero-on-e2e-failure`**（例如 **`pnpm run reaslab-test -- --exit-zero-on-e2e-failure`**）：**始终以退出码 0 结束**，供 GitHub 定时 job 不因 E2E/Vercel/飞书任一步异常而标红；各功能点的通过/失败仍体现在 **Playwright HTML 报告**（及 Vercel 上的报告）中，飞书在能发时仍会发（可能无报告 URL）。
- * 运行：**`pnpm run reaslab-test`** 默认带 **`--scope-file=common/run-scope.txt`**（见 `package.json`）；或 `node run.mjs --e2e=test:05`（脚本名须存在于 `package.json`）。
- * **按 scope 跑**：编辑 **`common/run-scope.txt`**（或自建路径），或设环境变量 **`E2E_SCOPE_FILE`** 覆盖路径（GitHub Actions 等）；解析逻辑见 **`common/parse-run-scope.mjs`**。
+ * 运行：**`pnpm run reaslab-test`** 默认带 **`--scope-file=common/run-scope-beta.txt`**（见 `package.json`）；或 `node run.mjs --e2e=test:05`（脚本名须存在于 `package.json`）。
+ * **按 scope 跑**：编辑 **`common/run-scope-beta.txt`**（或自建路径），或设环境变量 **`E2E_SCOPE_FILE`** 覆盖路径（GitHub Actions 等）；解析逻辑见 **`common/parse-run-scope.mjs`**。
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";

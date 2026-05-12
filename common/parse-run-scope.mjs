@@ -1,5 +1,5 @@
 /**
- * 解析 **`run-scope.txt`**（与 **`run.mjs`**、**`send-feishu.mjs`** 共用）。
+ * 解析 **`common/`** 下 scope 列表文件（如 **`run-scope-beta.txt`** / **`run-scope-test.txt`**；与 **`run.mjs`**、**`send-feishu.mjs`** 共用）。
  *
  * - **两列（Tab）**：`脚本名<TAB>执行顺序`。脚本名与 **`test/NN-<slug>.test.ts`** 中的 **`<slug>`** 一致（如 **`playground`**）；章节号由 **`options.testDir`** 下文件名反查。**执行顺序**为整数，**`-1` 表示最后执行**。
  * - **无 Tab**：整行仅由章节号与空白组成（如 `01 05`），顺序规则同前。

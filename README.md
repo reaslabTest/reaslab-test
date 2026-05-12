@@ -20,11 +20,11 @@ pnpm install
 
 ### 1）完整链路（Playwright → Vercel 报告 → 飞书）
 
-入口 **`run.mjs`**：先按 **`common/run-scope.txt`**（**`common/parse-run-scope.mjs`**：两列 **`脚本名<TAB>执行顺序`**，章节号由 **`test/NN-<slug>.test.ts`** 反查；**`-1`** 最后跑）解析出有序章节号并跑对应用例（**`pnpm run reaslab-test`**），再上传 **`playwright-report`** 并通知飞书；**用例失败也会继续发报告**。默认**退出码**反映测试是否通过（以及后续 Vercel / 飞书是否成功）。定时 workflow 使用 **`pnpm run reaslab-test -- --exit-zero-on-e2e-failure`**，使 **`run.mjs`** 收到 **`--exit-zero-on-e2e-failure`** 时**始终以 0 退出**——各用例绿/红仍体现在 **HTML 报告**（及 Vercel 若部署成功）；飞书在能发时仍会发。
+入口 **`run.mjs`**：先按 **`common/run-scope-beta.txt`**（**`common/parse-run-scope.mjs`**：两列 **`脚本名<TAB>执行顺序`**，章节号由 **`test/NN-<slug>.test.ts`** 反查；**`-1`** 最后跑）解析出有序章节号并跑对应用例（**`pnpm run reaslab-test`**），再上传 **`playwright-report`** 并通知飞书；**用例失败也会继续发报告**。默认**退出码**反映测试是否通过（以及后续 Vercel / 飞书是否成功）。定时 workflow 使用 **`pnpm run reaslab-test -- --exit-zero-on-e2e-failure`**，使 **`run.mjs`** 收到 **`--exit-zero-on-e2e-failure`** 时**始终以 0 退出**——各用例绿/红仍体现在 **HTML 报告**（及 Vercel 若部署成功）；飞书在能发时仍会发。
 
 | 目的 | 命令 |
 |------|------|
-| 按 **`common/run-scope.txt`** 列 **`脚本名<TAB>执行顺序`**（见 **`common/parse-run-scope.mjs`**）+ 报告 + 飞书；**测挂则非 0**（编辑该文件即可改跑哪些用例；环境变量 **`E2E_SCOPE_FILE`** 可覆盖列表路径） | `pnpm run reaslab-test` |
+| 按 **`common/run-scope-beta.txt`** 列 **`脚本名<TAB>执行顺序`**（见 **`common/parse-run-scope.mjs`**）+ 报告 + 飞书；**测挂则非 0**（编辑该文件即可改跑哪些用例；环境变量 **`E2E_SCOPE_FILE`** 可覆盖列表路径） | `pnpm run reaslab-test` |
 
 ### 2）单个测试程序
 

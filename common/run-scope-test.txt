@@ -1,0 +1,5 @@
+# 测试环境（`schedule_test.yml`）部分 E2E scope：与 **`run-scope-beta.txt`** 同格式（Tab 两列）；章节子集可随需增删。
+# 当前为轻量冒烟：工作台 playground、页脚链接、项目列表（末位 -1）。
+playground	1
+footer-links	2
+project-list	-1

@@ -4,12 +4,14 @@ import path from "node:path";
 import { chromium, type FullConfig, type Page } from "@playwright/test";
 
 /**
- * 被测前端 origin（与 `playwright.config` 根级 `baseURL` 同源；改环境时只改 **`E2E_BASE_URL_DEFAULT`**）。
- * 单行格式供 **`send-results/send-feishu.mjs`** 解析；飞书「被测网站」展示可用环境变量 **`E2E_BASE_URL`** 覆盖。
+ * 被测前端 origin（与 `playwright.config` 根级 `baseURL` 同源）。
+ * **默认**：**`E2E_BASE_URL_DEFAULT`**（单行格式供 **`send-results/send-feishu.mjs`** 解析默认行）。
+ * **CI 多站**：进程环境变量 **`E2E_BASE_URL`**（trim 后非空）优先，用于 B 站 workflow 等；未设置时回退默认。
  */
 const E2E_BASE_URL_DEFAULT = "https://beta.reaslab.io";
 
-export const E2E_BASE_URL = E2E_BASE_URL_DEFAULT;
+export const E2E_BASE_URL =
+  (process.env.E2E_BASE_URL ?? "").trim().replace(/\/+$/, "") || E2E_BASE_URL_DEFAULT;
 
 /**
  * 飞书自定义机器人 Webhook 默认值（**`send-results/send-feishu.mjs`** 会解析本文件中的 **`FEISHU_WEBHOOK_URL_DEFAULT`** 行；流水线可用 **`FEISHU_WEBHOOK_URL`** 覆盖）。
@@ -23,9 +25,12 @@ export const FEISHU_WEBHOOK_URL =
 
 /**
  * Cloudflare Access + 服务令牌：请求携带与策略一致的 **Id/Secret**（**`x-testing-auth`**）及固定 **User-Agent**，不依赖 runner 出口 IP。
- * 与 **beta.reaslab.io** 侧策略变更时在此同步更新。
+ * 与 **beta.reaslab.io** 侧策略变更时在此同步更新默认值；B 站等可在 CI 设 **`E2E_CF_TESTING_AUTH`** 覆盖。
  */
-export const E2E_CF_TESTING_AUTH = "Sec-Auto-9vP#2zR7_Qx8k-2026";
+const E2E_CF_TESTING_AUTH_DEFAULT = "Sec-Auto-9vP#2zR7_Qx8k-2026";
+
+export const E2E_CF_TESTING_AUTH =
+  (process.env.E2E_CF_TESTING_AUTH ?? "").trim() || E2E_CF_TESTING_AUTH_DEFAULT;
 export const E2E_BOT_USER_AGENT =
   process.env.E2E_USER_AGENT ?? "Internal-QA-Bot/1.0 (E2E-Automated-Runner)";
 

@@ -32,7 +32,7 @@
     "test:13": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts",
     "test:13:headed": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts --headed",
 
-    "reaslab-test": "node run.mjs --scope-file=common/run-scope.txt",
+    "reaslab-test": "node run.mjs --scope-file=common/run-scope-beta.txt",
 
     "report:feishu": "node send-results/send-feishu.mjs",
     "vercel:login": "vercel login",
