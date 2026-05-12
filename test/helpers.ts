@@ -857,7 +857,7 @@ export const CH12_2_TEX_MCP_USER_PROMPT =
 
 /**
  * `docs/用户场景.md` §12.2（调用tex_mcp）：侧栏 **ReasLingo** 保证为 **Default** Agent（见 **`AgentSelector.tsx`**：`currentAgent === "default"` 时触发器文案为 **Agent**，且 **Default** 不出现在下拉列表中）→ **New Chat** → 发送 **`CH12_2_TEX_MCP_USER_PROMPT`**，
- * 流结束后断言 **`compile_tex`** 与 **`get_compile_log`** 在侧栏正文中的出现顺序，并断言编译 log 常见片段（与 **`test_upload.tex`** 成功编译一致）。
+ * 发送后轮询 **`compile_tex`** 出现在侧栏（与 §7.5 **`python_mcp:`** 探针同理，**不**依赖用户原文整句 DOM 回显）；流结束后断言 **`compile_tex`** 与 **`get_compile_log`** 在侧栏正文中的出现顺序，并断言编译 log 常见片段（与 **`test_upload.tex`** 成功编译一致）。
  *
  * **前提**：工程根目录已存在 **`test_upload.tex`**（由 **`uploadSingleFileViaExploreUploadDialog`** 等写入）。
  */
@@ -928,9 +928,11 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
 
+  // 与 `reasLingoDefaultAgentMcpPythonProbe` 一致：等待侧栏出现 **助手/工具流** 信号，勿断言用户原文整句已挂载到 DOM
+  //（产品可能折叠、摘要或延迟渲染用户气泡；截图中侧栏仍为欢迎态时 `Send Message` 也会长期 disabled）。
   await expect(async () => {
     await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    await expect(host.getByText(/Use compile_tex to compile test_upload\.tex/i).first()).toBeVisible();
+    await expect(host.getByText(/\bcompile_tex\b/i).first()).toBeVisible();
   }).toPass({ timeout: 60_000 });
 
   await waitForReasLingoAssistantReplyDone(page);
