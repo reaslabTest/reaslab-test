@@ -815,7 +815,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
  * `docs/用户场景.md` §7.5：**第二次**跑与 **§7.4** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**，与
  * **`readFirstPythonDataNameFromIdeFileTree`** / **`openFirstPythonFileRowInFileTree`** 一致）：侧栏 **ReasLingo**、
  * **保持默认 Agent**（不打开 Agent 菜单切换），经 **`python_mcp`** 在项目工作区内**按 `python <file>` 方式全量执行**
- * 该脚本（与 **§7.4** 工具栏 **Run Python** 形成「IDE 运行键 → AI MCP」两遍验收）。
+ * 该脚本（与 **§7.4** 工具栏 **Run Python** 形成「IDE 运行键 → AI MCP」两遍验收）。**发用户句前** **`waitForTimeout(1s)`**。
  */
 export async function reasLingoDefaultAgentMcpPythonProbe(
   page: Page,
@@ -834,6 +834,7 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
 
   const ta = host.locator("textarea").first();
   await expect(ta).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(1_000);
   await ta.click();
   await ta.fill(prompt);
   const sendBtn = host.getByTitle("Send Message").first();
