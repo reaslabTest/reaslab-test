@@ -4,14 +4,14 @@
  * 报告链接：可选 `node send-results/send-feishu.mjs <报告URL>`（有 URL 时发 **interactive** 卡片，带「打开报告」按钮；摘要正文不再含可点击 URL 行）。
  * 摘要 JSON：固定 `test-results/e2e-results.json`。
  * **被测网站 URL**：环境变量 **`E2E_BASE_URL`**（未设置时读 **`common/global-setup.ts`** 的 **`E2E_BASE_URL_DEFAULT`**）用于 **卡片 header 副标题**；摘要正文不再写「被测网站:…」与「--- 报告摘要 ---」。测 `localhost:3000` 时请先 `export E2E_BASE_URL=…` 再跑 `run.mjs`（子进程会继承）。
- * **章节范围**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无章节数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。
+ * **场景范围（run-scope）**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无 scope 场景数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。
  * **飞书 `code=11232` 频率限制**：自动退避重试（默认最多 **6** 次发送，可用 **`FEISHU_WEBHOOK_MAX_ATTEMPTS`** 覆盖，上限 12）。 */
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { parseScopeToOrderedChapterIds } from "../common/parse-run-scope.mjs";
+import { parseScopeToOrderedSceneIds } from "../common/parse-run-scope.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -81,8 +81,8 @@ function loadPlaywrightReportObject() {
   }
 }
 
-/** 仅当 `run.mjs` 注入 **`E2E_SCOPE_FILE`** 时读取 scope 文件，返回与 **`run.mjs`** 一致的**执行顺序**章节号列表（见 **`common/parse-run-scope.mjs`**）。 */
-function loadScopeChapterIdsForChapterLabel() {
+/** 仅当 `run.mjs` 注入 **`E2E_SCOPE_FILE`** 时读取 scope 文件，返回与 **`run.mjs`** 一致的**执行顺序**场景号列表（见 **`common/parse-run-scope.mjs`**）。 */
+function loadScopeOrderedSceneIds() {
   const fromEnv = (process.env.E2E_SCOPE_FILE ?? "").trim();
   if (!fromEnv) {
     return [];
@@ -92,7 +92,7 @@ function loadScopeChapterIdsForChapterLabel() {
     return [];
   }
   try {
-    return parseScopeToOrderedChapterIds(fs.readFileSync(tryPath, "utf8"), {
+    return parseScopeToOrderedSceneIds(fs.readFileSync(tryPath, "utf8"), {
       testDir: path.join(REPO_ROOT, "test"),
     });
   } catch {
@@ -138,7 +138,7 @@ function shortSlugFromTestPath(fileKey) {
   return base || fileKey;
 }
 
-function chaptersFromProgramMap(programMap) {
+function sortedSceneIdsFromProgramMap(programMap) {
   const ids = [];
   for (const k of programMap.keys()) {
     const m = /^test\/(\d{2})-/i.exec(k);
@@ -149,8 +149,8 @@ function chaptersFromProgramMap(programMap) {
   return [...new Set(ids)].sort();
 }
 
-function findProgramFileKeyForChapter(chapterId, programMap) {
-  const prefix = `test/${chapterId}-`;
+function findProgramFileKeyForSceneId(sceneId, programMap) {
+  const prefix = `test/${sceneId}-`;
   for (const k of programMap.keys()) {
     if (k.startsWith(prefix)) {
       return k;
@@ -411,30 +411,30 @@ function buildProgramSummaryMarkdownTable(scenarioRows) {
  * @param {object} data Playwright JSON
  * @returns {{ scenarioRows: { heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[], N: number, failedProg: number } | null}
  */
-function computeChapterScenarioBlock(data) {
+function computeScenarioBlock(data) {
   if (!data || typeof data !== "object") {
     return null;
   }
-  const scopeChapterIds = loadScopeChapterIdsForChapterLabel();
+  const scopeSceneIds = loadScopeOrderedSceneIds();
   const featureMap = collectFeaturePointsByProgramFile(data);
-  const fromJson = chaptersFromProgramMap(featureMap);
-  const chaptersOrdered =
-    scopeChapterIds.length > 0 ? [...scopeChapterIds].sort() : fromJson.length > 0 ? fromJson : [];
-  const N = chaptersOrdered.length;
+  const fromJson = sortedSceneIdsFromProgramMap(featureMap);
+  const sceneIdsOrdered =
+    scopeSceneIds.length > 0 ? [...scopeSceneIds].sort() : fromJson.length > 0 ? fromJson : [];
+  const N = sceneIdsOrdered.length;
   if (N <= 0) {
     return null;
   }
   /** @type {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[]} */
   const scenarioRows = [];
   let failedProg = 0;
-  for (const ch of chaptersOrdered) {
-    const key = findProgramFileKeyForChapter(ch, featureMap);
+  for (const sceneId of sceneIdsOrdered) {
+    const key = findProgramFileKeyForSceneId(sceneId, featureMap);
     const rawEntry = key ? featureMap.get(key) : undefined;
     const entry = rawEntry ?? { programHeading: null, items: [] };
-    const shortName = key ? shortSlugFromTestPath(key) : ch;
+    const shortName = key ? shortSlugFromTestPath(key) : sceneId;
     const heading =
       (entry.programHeading && String(entry.programHeading).trim()) ||
-      `${ch}（${shortName}）`;
+      `${sceneId}（${shortName}）`;
     if (entry.items.some((it) => it.tone === "red")) {
       failedProg++;
     }
@@ -519,7 +519,7 @@ function formatPlaywrightSummary(data, options = {}) {
     return null;
   }
   const parts = [];
-  const block = computeChapterScenarioBlock(data);
+  const block = computeScenarioBlock(data);
 
   if (block) {
     const { scenarioRows, N, failedProg } = block;
@@ -729,7 +729,7 @@ function buildPayload() {
       ? formatPlaywrightSummary(data, { failureTable: true, nativeFeishuTable: true })
       : null;
     const rawMarkdown = summaryMd ?? buildPlainText({ failureTable: true });
-    const block = data ? computeChapterScenarioBlock(data) : null;
+    const block = data ? computeScenarioBlock(data) : null;
     const tableEl =
       block?.scenarioRows?.length && data
         ? buildFeishuProgramSummaryTableElement(block.scenarioRows)

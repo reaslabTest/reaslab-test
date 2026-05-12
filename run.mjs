@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 完整链路：`pnpm run <e2e 脚本>` 或 **`--scope-file=…`** 指定章节子集 → `send-results/send-vercel.mjs` → `send-results/send-feishu.mjs`。
+ * 完整链路：`pnpm run <e2e 脚本>` 或 **`--scope-file=…`** 指定场景子集 → `send-results/send-vercel.mjs` → `send-results/send-feishu.mjs`。
  * **用例失败时仍会部署报告并通知飞书**，便于查看 HTML 报告与摘要；默认进程退出码仍反映测试是否通过（供 CI 标红）。
  * 若传入 **`--exit-zero-on-e2e-failure`**（例如 **`pnpm run reaslab-test -- --exit-zero-on-e2e-failure`**）：**始终以退出码 0 结束**，供 GitHub 定时 job 不因 E2E/Vercel/飞书任一步异常而标红；各功能点的通过/失败仍体现在 **Playwright HTML 报告**（及 Vercel 上的报告）中，飞书在能发时仍会发（可能无报告 URL）。
  * 运行：**`pnpm run reaslab-test`** 默认带 **`--scope-file=common/run-scope-beta.txt`**（见 `package.json`）；或 `node run.mjs --e2e=test:05`（脚本名须存在于 `package.json`）。
@@ -12,7 +12,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { parseScopeToOrderedChapterIds } from "./common/parse-run-scope.mjs";
+import { parseScopeToOrderedSceneIds } from "./common/parse-run-scope.mjs";
 import { deployPlaywrightReportToVercel } from "./send-results/send-vercel.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -27,18 +27,18 @@ function run(cmd, args, opts = {}) {
   });
 }
 
-/** 将章节号解析为 `test/NN-*.test.ts` 实际路径（相对仓库根）。 */
-function resolveScopeTestPaths(repoRoot, chapterIds) {
-  if (chapterIds.length === 0) {
-    throw new Error("run-scope: 未配置任何章节号（文件为空或仅注释）");
+/** 将场景号（`NN`）解析为 `test/NN-*.test.ts` 实际路径（相对仓库根）。 */
+function resolveScopeTestPaths(repoRoot, sceneIds) {
+  if (sceneIds.length === 0) {
+    throw new Error("run-scope: 未配置任何场景号（文件为空或仅注释）");
   }
   const testDir = path.join(repoRoot, "test");
   const files = readdirSync(testDir).filter((f) => /^\d{2}-.+\.test\.ts$/.test(f));
   const rel = [];
-  for (const id of chapterIds) {
+  for (const id of sceneIds) {
     const hit = files.find((f) => f.startsWith(`${id}-`));
     if (!hit) {
-      throw new Error(`run-scope: 未找到章节 ${id} 对应用例（期望 test/${id}-*.test.ts）`);
+      throw new Error(`run-scope: 未找到场景 ${id} 对应用例（期望 test/${id}-*.test.ts）`);
     }
     rel.push(path.join("test", hit));
   }
@@ -83,12 +83,12 @@ if (scopeFilePath) {
     );
   }
   const raw = readFileSync(scopeFilePath, "utf8");
-  const ids = parseScopeToOrderedChapterIds(raw, { testDir: path.join(REPO_ROOT, "test") });
+  const ids = parseScopeToOrderedSceneIds(raw, { testDir: path.join(REPO_ROOT, "test") });
   const testPaths = resolveScopeTestPaths(REPO_ROOT, ids);
   const scopeLabel = path.relative(REPO_ROOT, scopeFilePath) || scopeFilePath;
   console.log(`[run.mjs] run-scope 来自 ${scopeLabel}（共 ${testPaths.length} 个文件，按执行顺序）：`);
   for (let i = 0; i < testPaths.length; i++) {
-    console.log(`  ${i + 1}. ${testPaths[i]}  (章节 ${ids[i]})`);
+    console.log(`  ${i + 1}. ${testPaths[i]}  (场景 ${ids[i]})`);
   }
   t = run(
     pnpmCmd,

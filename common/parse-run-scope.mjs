@@ -1,10 +1,10 @@
 /**
  * 解析 **`common/`** 下 scope 列表文件（如 **`run-scope-beta.txt`** / **`run-scope-test.txt`**；与 **`run.mjs`**、**`send-feishu.mjs`** 共用）。
  *
- * - **两列（Tab）**：`脚本名<TAB>执行顺序`。脚本名与 **`test/NN-<slug>.test.ts`** 中的 **`<slug>`** 一致（如 **`playground`**）；章节号由 **`options.testDir`** 下文件名反查。**执行顺序**为整数，**`-1` 表示最后执行**。
- * - **无 Tab**：整行仅由章节号与空白组成（如 `01 05`），顺序规则同前。
+ * - **两列（Tab）**：`脚本名<TAB>执行顺序`。脚本名与 **`test/NN-<slug>.test.ts`** 中的 **`<slug>`** 一致（如 **`playground`**）；**场景号**（`NN`）由 **`options.testDir`** 下文件名反查。**执行顺序**为整数，**`-1` 表示最后执行**。
+ * - **无 Tab**：整行仅由**场景号**与空白组成（如 `01 05`），顺序规则同前。
  *
- * 同一章节号出现两次 → **抛错**。返回值为**去重后**按执行顺序排列的章节号数组。
+ * 同一场景号出现两次 → **抛错**。返回值为**去重后**按执行顺序排列的**场景号**数组。
  *
  * @param {string} raw 文件全文
  * @param {{ testDir?: string }} [options] 含 Tab 的数据行须传 **`testDir`**（一般为仓库根下 **`test`** 的绝对路径）。
@@ -17,7 +17,7 @@ import path from "node:path";
  * @param {string} testDirAbs **`test`** 目录绝对路径
  * @param {string} slug **`NN-<slug>.test.ts`** 中的 **`<slug>`**
  */
-function chapterIdFromSlug(testDirAbs, slug) {
+function sceneIdFromSlug(testDirAbs, slug) {
   const abs = path.resolve(testDirAbs);
   let files;
   try {
@@ -38,10 +38,10 @@ function chapterIdFromSlug(testDirAbs, slug) {
   return /** @type {string} */ (m?.[1]);
 }
 
-export function parseScopeToOrderedChapterIds(raw, options = {}) {
+export function parseScopeToOrderedSceneIds(raw, options = {}) {
   const testDir = (options.testDir ?? "").trim();
 
-  /** @type {{ chapterId: string, order: number, seq: number }[]} */
+  /** @type {{ sceneId: string, order: number, seq: number }[]} */
   const entries = [];
   let seq = 0;
   let dataLine = 0;
@@ -78,45 +78,45 @@ export function parseScopeToOrderedChapterIds(raw, options = {}) {
       }
       if (!testDir) {
         throw new Error(
-          'run-scope: 两列「脚本名<TAB>执行顺序」须在 parseScopeToOrderedChapterIds(raw, { testDir }) 中传入 test 目录',
+          'run-scope: 两列「脚本名<TAB>执行顺序」须在 parseScopeToOrderedSceneIds(raw, { testDir }) 中传入 test 目录',
         );
       }
-      const chapterId = chapterIdFromSlug(testDir, slug);
-      entries.push({ chapterId, order, seq: seq++ });
+      const sceneId = sceneIdFromSlug(testDir, slug);
+      entries.push({ sceneId, order, seq: seq++ });
       continue;
     }
 
     let col = 0;
     for (const token of cut.split(/\s+/)) {
       if (!/^\d{1,2}$/.test(token)) {
-        throw new Error(`run-scope: 非法项 "${token}"（须为 1～99 的章节号，如 01、5）`);
+        throw new Error(`run-scope: 非法项 "${token}"（须为 1～99 的场景号，如 01、5）`);
       }
       const n = Number.parseInt(token, 10);
       if (n < 1 || n > 99) {
-        throw new Error(`run-scope: 章节号越界 "${token}"`);
+        throw new Error(`run-scope: 场景号越界 "${token}"`);
       }
-      const chapterId = String(n).padStart(2, "0");
+      const sceneId = String(n).padStart(2, "0");
       const order = dataLine * 1000 + col;
       col += 1;
-      entries.push({ chapterId, order, seq: seq++ });
+      entries.push({ sceneId, order, seq: seq++ });
     }
   }
 
   if (entries.length === 0) {
-    throw new Error("run-scope: 未配置任何章节（文件为空或仅注释）");
+    throw new Error("run-scope: 未配置任何场景（文件为空或仅注释）");
   }
 
-  const byChapter = new Map();
+  const byScene = new Map();
   for (const e of entries) {
-    if (byChapter.has(e.chapterId)) {
-      throw new Error(`run-scope: 章节 ${e.chapterId} 重复出现，请合并为一行`);
+    if (byScene.has(e.sceneId)) {
+      throw new Error(`run-scope: 场景 ${e.sceneId} 重复出现，请合并为一行`);
     }
-    byChapter.set(e.chapterId, e);
+    byScene.set(e.sceneId, e);
   }
-  const list = [...byChapter.values()];
+  const list = [...byScene.values()];
   const primary = list.filter((e) => e.order !== -1);
   const lastGroup = list.filter((e) => e.order === -1);
   primary.sort((a, b) => a.order - b.order || a.seq - b.seq);
   lastGroup.sort((a, b) => a.seq - b.seq);
-  return [...primary, ...lastGroup].map((e) => e.chapterId);
+  return [...primary, ...lastGroup].map((e) => e.sceneId);
 }
