@@ -567,7 +567,7 @@ function formatPlaywrightSummary(data, options = {}) {
     const { scenarioRows, N, failedProg, successProg, greyProg } = block;
     parts.push(
       greyProg > 0
-        ? `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个，灰色 **${greyProg}** 个（共 **${N}** 个；灰色与表内图例一致，含无执行记录或仅有跳过等）`
+        ? `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个，跳过 **${greyProg}** 个（共 **${N}** 个）`
         : `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个（共 **${N}** 个）`,
     );
     parts.push(scenarioColorLegendLine(options.htmlLegend));
