@@ -4,7 +4,7 @@
  * 报告链接：可选 `node send-results/send-feishu.mjs <报告URL>`（有 URL 时发 **interactive** 卡片，带「打开报告」按钮；摘要正文不再含可点击 URL 行）。
  * 摘要 JSON：固定 `test-results/e2e-results.json`。
  * **被测网站 URL**：环境变量 **`E2E_BASE_URL`**（未设置时读 **`common/global-setup.ts`** 的 **`E2E_BASE_URL_DEFAULT`**）用于 **卡片 header 副标题**；摘要正文不再写「被测网站:…」与「--- 报告摘要 ---」。测 `localhost:3000` 时请先 `export E2E_BASE_URL=…` 再跑 `run.mjs`（子进程会继承）。
- * **场景范围（run-scope）**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无 scope 场景数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。
+ * **场景范围（run-scope）**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无 scope 场景数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）；每条功能点后附 **运行时间**（与 HTML 报告一致，取自 Playwright JSON **`results` 末条**的 **`duration`**，如 **`20.2s`** / **`1.2m`**）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。
  * **飞书 `code=11232` 频率限制**：自动退避重试（默认最多 **6** 次发送，可用 **`FEISHU_WEBHOOK_MAX_ATTEMPTS`** 覆盖，上限 12）。 */
 import fs from "node:fs";
 import path from "node:path";
@@ -177,11 +177,30 @@ function stripLeadingProgramHeadingFromCaseTitle(title, programHeading) {
 const MAX_FEATURE_ROWS_PER_PROGRAM = 40;
 
 /**
+ * Playwright JSON **`TestResult.duration`**（毫秒）→ 与 HTML 报告相近的 **`25.7s`** / **`1.2m`** / **`1.5h`**。
+ * @param {number | null | undefined} ms
+ * @returns {string} 无法格式化时为空串。
+ */
+function formatPlaywrightLikeDuration(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) {
+    return "";
+  }
+  if (n >= 3_600_000) {
+    return `${(n / 3_600_000).toFixed(1)}h`;
+  }
+  if (n >= 60_000) {
+    return `${(n / 60_000).toFixed(1)}m`;
+  }
+  return `${(n / 1000).toFixed(1)}s`;
+}
+
+/**
  * 按 `test/NN-*.test.ts` 收集各功能点标题与结果色类（与 Playwright JSON suite 树一致）。
- * @returns {Map<string, { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] }>}
+ * @returns {Map<string, { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] }>}
  */
 function collectFeaturePointsByProgramFile(data) {
-  /** @type {Map<string, { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] }>} */
+  /** @type {Map<string, { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] }>} */
   const map = new Map();
   function ensure(key) {
     if (!map.has(key)) {
@@ -218,22 +237,23 @@ function collectFeaturePointsByProgramFile(data) {
         }
         const bucket = ensure(fileKey);
         const status = last.status;
+        const durationMs = typeof last.duration === "number" && Number.isFinite(last.duration) ? last.duration : null;
         const full = [name, specTitle].filter(Boolean).join(" › ");
         let label = stripLeadingTestFileFromTitle(full || specTitle || "(未命名用例)");
         label = stripLeadingProgramHeadingFromCaseTitle(label, bucket.programHeading);
         if (status === "skipped") {
-          bucket.items.push({ title: label, tone: "grey", flaky: false });
+          bucket.items.push({ title: label, tone: "grey", flaky: false, durationMs });
         } else if (status === "failed" || status === "timedOut" || status === "interrupted") {
-          bucket.items.push({ title: label, tone: "red", flaky: false });
+          bucket.items.push({ title: label, tone: "red", flaky: false, durationMs });
         } else if (status === "passed") {
           const flaky =
             results.length > 1 &&
             results.slice(0, -1).some((r) =>
               r.status === "failed" || r.status === "timedOut" || r.status === "interrupted",
             );
-          bucket.items.push({ title: label, tone: "green", flaky });
+          bucket.items.push({ title: label, tone: "green", flaky, durationMs });
         } else {
-          bucket.items.push({ title: label, tone: "grey", flaky: false });
+          bucket.items.push({ title: label, tone: "grey", flaky: false, durationMs });
         }
       }
     }
@@ -293,9 +313,9 @@ function formatStatsStartTimeBeijing(startTime) {
   return `${local.replace("T", " ")}（北京时间，UTC+8）`;
 }
 
-/** @param {{ title: string, tone: "red" | "green" | "grey", flaky: boolean }} item */
+/** @param {{ title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }} item */
 function wrapFeatureLineForCard(item) {
-  const t = escapeInnerForFeishuFont(item.title, 260);
+  const t = escapeInnerForFeishuFont(item.title, 240);
   let inner;
   if (item.tone === "red") {
     inner = `<font color='red'>${t}</font>`;
@@ -303,6 +323,10 @@ function wrapFeatureLineForCard(item) {
     inner = `<font color='grey'>${t}</font>`;
   } else {
     inner = `<font color='green'>${t}</font>`;
+  }
+  const dur = item.durationMs != null ? formatPlaywrightLikeDuration(item.durationMs) : "";
+  if (dur) {
+    inner += `<font color='grey'> · ${escapeInnerForFeishuFont(dur, 24)}</font>`;
   }
   if (item.flaky) {
     inner += "<font color='grey'>（不稳）</font>";
@@ -312,7 +336,7 @@ function wrapFeatureLineForCard(item) {
 
 /**
  * 第一列「场景」颜色：有失败（红）→红；功能点全未执行（全灰）→灰；否则（含全成功或绿+灰）→绿。
- * @param {{ programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] }} entry
+ * @param {{ programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] }} entry
  * @returns {"red" | "green" | "grey"}
  */
 function scenarioRollupToneFromItems(entry) {
@@ -365,9 +389,18 @@ function plainTagForFeatureItem(item) {
   return "[成功]";
 }
 
+/** 纯文本摘要：功能点标题后附耗时（与卡片一致）。 */
+function plainDurationSuffix(item) {
+  const dur =
+    item.durationMs != null && Number.isFinite(item.durationMs)
+      ? formatPlaywrightLikeDuration(item.durationMs)
+      : "";
+  return dur ? ` · ${dur}` : "";
+}
+
 /**
  * 功能点列：行内 `<font color>` 着色；多条之间仅用 **`<br/>`** 换行（不插入空行）。
- * @param {{ programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] }} entry
+ * @param {{ programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] }} entry
  */
 function buildFeatureColumnMarkdownInline(entry) {
   const { items } = entry;
@@ -390,7 +423,7 @@ function buildFeatureColumnMarkdownInline(entry) {
 /**
  * 飞书卡片 Markdown（JSON 2.0）支持 GFM 表；**勿**用 `<center>`（会原样显示）。
  * 列对齐：`| :--- | :--- |` → 两列左对齐（用于纯文本 Webhook 等无 **`table`** 组件时）。
- * @param {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[]} scenarioRows
+ * @param {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[]} scenarioRows
  */
 function buildProgramSummaryMarkdownTable(scenarioRows) {
   const lines = [
@@ -409,7 +442,7 @@ function buildProgramSummaryMarkdownTable(scenarioRows) {
 /**
  * 与 `formatPlaywrightSummary` 中 `N > 0` 分支一致：按 scope / JSON 得到有序场景行。
  * @param {object} data Playwright JSON
- * @returns {{ scenarioRows: { heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[], N: number, failedProg: number } | null}
+ * @returns {{ scenarioRows: { heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[], N: number, failedProg: number } | null}
  */
 function computeScenarioBlock(data) {
   if (!data || typeof data !== "object") {
@@ -424,7 +457,7 @@ function computeScenarioBlock(data) {
   if (N <= 0) {
     return null;
   }
-  /** @type {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[]} */
+  /** @type {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[]} */
   const scenarioRows = [];
   let failedProg = 0;
   for (const sceneId of sceneIdsOrdered) {
@@ -445,7 +478,7 @@ function computeScenarioBlock(data) {
 
 /**
  * 飞书卡片 JSON 2.0 **`table`**：列宽与顶对齐可控，比 GFM 表更易压缩首列与行内留白。
- * @param {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean }[] } }[]} scenarioRows
+ * @param {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[]} scenarioRows
  */
 function buildFeishuProgramSummaryTableElement(scenarioRows) {
   const n = scenarioRows.length;
@@ -541,8 +574,8 @@ function formatPlaywrightSummary(data, options = {}) {
         } else {
           for (const it of entry.items) {
             const tag = plainTagForFeatureItem(it);
-            const line = escapeInnerForFeishuFont(it.title, 220);
-            parts.push(`  ${tag} ${line}`);
+            const line = escapeInnerForFeishuFont(it.title, 200);
+            parts.push(`  ${tag} ${line}${plainDurationSuffix(it)}`);
           }
         }
         parts.push("");
