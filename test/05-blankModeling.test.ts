@@ -17,6 +17,10 @@ import {
 
 const TEST_UPLOAD_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "test_upload.png");
 
+/** §5.13：无服务端已存 Gurobi WLS 且未注入三项环境变量时，前端禁用 Test，用例跳过。 */
+const MODELING_CH5_13_GUROBI_SKIP_MSG =
+  "§5.13：Gurobi WLS 三项未填（项目无已存凭据）且未设置 E2E_GUROBI_WLS_ACCESS_ID / E2E_GUROBI_WLS_SECRET / E2E_GUROBI_LICENSE_ID，Test 不可用；跳过。";
+
 /** 与 `@reaslab/file-tree` 节点 `data-name` 一致；避免树上另有 `/test_upload.png` 时 `getByText` 触发 strict 双匹配。 */
 function chatUploadsTestPngTreeLabel(fileTree: Locator) {
   return fileTree.locator(`span[data-name="/chat-uploads/test_upload.png"]`);
@@ -34,6 +38,11 @@ function reasLingoHosts(page: Page) {
     .filter({ has: page.getByTitle("Add Context") })
     .first();
   return { reasLingoInputHost };
+}
+
+/** §5.9～5.11：侧栏 ReasLingo 工具条在默认 1280×720 下易被裁切；仅这三条加宽视口（不设嵌套 describe，以免报告标题多一层）。 */
+async function widenViewportForReasLingoInputToolbar(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1680, height: 900 });
 }
 
 /** §5.9～§5.11：`MessageInput` 仅在 **default** Agent 时渲染 Chain of Thought / Web Search / More Settings；§5.4 后须切回默认。 */
@@ -385,12 +394,9 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     expect(download.suggestedFilename().toLowerCase().endsWith(".zip")).toBeTruthy();
   });
 
-  test.describe("§5.9～5.11 ReasLingo 输入条", () => {
-    /** 默认 1280×720 时侧栏内工具条易被裁切，报告截图看不到 Web Search；略加宽视口。 */
-    test.use({ viewport: { width: 1680, height: 900 } });
-
   test("5.9 AI会话设置（Chain of Thought）", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
     const { reasLingoInputHost } = reasLingoHosts(page);
@@ -412,6 +418,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
   test("5.10 AI会话设置（Web Search）", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
     const { reasLingoInputHost } = reasLingoHosts(page);
@@ -434,6 +441,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
   test("5.11 AI会话设置（More Settings）", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
     const { reasLingoInputHost } = reasLingoHosts(page);
@@ -494,6 +502,86 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
     await page.keyboard.press("Escape");
     await expect(morePanel).toBeHidden({ timeout: 5_000 });
+    await page.setViewportSize({ width: 1280, height: 720 });
   });
+
+  test("5.12 Menu：更改主题为 One Dark", async ({ page }) => {
+    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+
+    await page.getByRole("button", { name: "Menu" }).click();
+    const settingsSheet = page
+      .locator('[data-slot="sheet-content"]')
+      .filter({ visible: true })
+      .filter({ has: page.getByText("Theme", { exact: true }) })
+      .first();
+    await expect(settingsSheet.getByRole("heading", { name: "Settings" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await settingsSheet.getByRole("heading", { name: "Settings" }).scrollIntoViewIfNeeded();
+
+    await expect(settingsSheet.getByText("Theme", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await settingsSheet.getByText("Theme", { exact: true }).scrollIntoViewIfNeeded();
+
+    const themeTrigger = settingsSheet.locator("#editorTheme");
+    await expect(themeTrigger).toBeVisible({ timeout: 10_000 });
+    await themeTrigger.click();
+
+    const oneDarkOption = page
+      .getByRole("option", { name: "One Dark", exact: true })
+      .or(page.locator('[data-slot="select-item"]').filter({ hasText: /^One Dark$/ }).first());
+    await expect(oneDarkOption.first()).toBeVisible({ timeout: 10_000 });
+    await oneDarkOption.first().click();
+
+    await expect(themeTrigger).toContainText("One Dark", { timeout: 10_000 });
+
+    await settingsSheet.getByRole("button", { name: "Close" }).click();
+    await expect(settingsSheet).toBeHidden({ timeout: 10_000 });
+  });
+
+  test("5.13 Solver Settings：Gurobi WLS License 点 Test 成功", async ({ page }) => {
+    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+
+    await page.getByTitle("Solver Settings").click();
+    await expect(
+      page.getByRole("heading", { name: "Solver Settings", exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+    const solverPanel = page
+      .locator('[data-sidebar="group"]')
+      .filter({ has: page.getByRole("heading", { name: "Solver Settings", exact: true }) })
+      .first();
+    await expect(solverPanel).toBeVisible({ timeout: 5_000 });
+
+    await solverPanel.getByRole("button", { name: /Gurobi WLS License/i }).click();
+    const accessInput = solverPanel.locator("#wlsAccessId");
+    await expect(accessInput).toBeVisible({ timeout: 15_000 });
+
+    const wlsAccess = process.env.E2E_GUROBI_WLS_ACCESS_ID?.trim();
+    const wlsSecret = process.env.E2E_GUROBI_WLS_SECRET?.trim();
+    const licenseId = process.env.E2E_GUROBI_LICENSE_ID?.trim();
+    if (wlsAccess && wlsSecret && licenseId) {
+      await accessInput.fill(wlsAccess);
+      await solverPanel.locator("#wlsSecret").fill(wlsSecret);
+      await solverPanel.locator("#licenseId").fill(licenseId);
+    }
+
+    const testBtn = solverPanel.getByRole("button", { name: "Test", exact: true });
+    await expect(testBtn).toBeVisible({ timeout: 10_000 });
+    if (await testBtn.isDisabled()) {
+      test.skip(true, MODELING_CH5_13_GUROBI_SKIP_MSG);
+    }
+
+    await testBtn.click();
+    const successMsg = solverPanel.getByText("Test successfully", { exact: true });
+    await expect(successMsg).toBeVisible({
+      timeout: 120_000,
+    });
+    await successMsg.scrollIntoViewIfNeeded();
+    // `screenshot: "on"` 时默认可在切回 Explorer 之后截屏，看不到成功文案；在离开 Solver 前附加「Test 成功」侧栏图。
+    await test.info().attach("5-13-gurobi-wls-test-success.png", {
+      body: await solverPanel.screenshot({ type: "png" }),
+      contentType: "image/png",
+    });
+
+    await page.getByRole("button", { name: /Explorer/i }).first().click();
   });
 });
