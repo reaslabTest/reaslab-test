@@ -1023,8 +1023,11 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
     await scrollArea.evaluate((el: HTMLElement) => {
       el.scrollTop = el.scrollHeight;
     });
-    await sessionRows.nth(n - 1).scrollIntoViewIfNeeded();
-    await sessionRows.nth(n - 1).click();
+    // 同步 `scrollTop` 后立刻点最后一条时，偶发未触发「选中会话」→ 浮层不自动关；略等滚动/布局稳定再点。
+    await page.waitForTimeout(1_000);
+    const lastSession = sessionRows.nth(n - 1);
+    await lastSession.scrollIntoViewIfNeeded();
+    await lastSession.click();
     await expect(pop).toBeHidden({ timeout: 15_000 });
   });
 
