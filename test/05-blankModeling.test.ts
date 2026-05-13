@@ -36,6 +36,89 @@ function reasLingoHosts(page: Page) {
   return { reasLingoInputHost };
 }
 
+/** §5.9～§5.11：`MessageInput` 仅在 **default** Agent 时渲染 Chain of Thought / Web Search / More Settings；§5.4 后须切回默认。 */
+async function ensureDefaultAgentForReasLingoInputToolbar(
+  page: Page,
+  reasLingoInputHost: Locator,
+): Promise<void> {
+  const defaultAgentTrigger = reasLingoInputHost.getByRole("button", { name: /^Agent$/i });
+  if (await defaultAgentTrigger.isVisible().catch(() => false)) {
+    return;
+  }
+  const nonDefaultAgentTrigger = reasLingoInputHost
+    .getByRole("button", { name: /ReasLab Agent/i })
+    .or(reasLingoInputHost.locator('button[title="Switch Agent"]'));
+  await expect(nonDefaultAgentTrigger.first()).toBeVisible({ timeout: 15_000 });
+  await nonDefaultAgentTrigger.first().click();
+  const agentMenuPanel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
+  await expect(agentMenuPanel).toBeVisible({ timeout: 10_000 });
+  const reasLabRow = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
+    hasText: /ReasLab Agent/i,
+  });
+  await expect(reasLabRow.first()).toBeVisible({ timeout: 10_000 });
+  await reasLabRow.first().click();
+  await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
+  await expect(reasLingoInputHost.getByRole("button", { name: /^Agent$/i })).toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+/**
+ * §5.9：§5.3 常把模型切到 **Auto**；reaslab-iipe `ChainOfThoughtSelector` 仅在解析模型 `supportsReasoning === true` 时渲染。
+ * 先关闭 Auto（与 `ModelSelector` 内开关一致）；若仍无按钮，再依次点选启用列表中的各模型行（跳过第 0 行「Auto」）。
+ */
+async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost: Locator): Promise<void> {
+  const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
+  const cot = () => reasLingoInputHost.getByTitle("Chain of Thought");
+
+  const openModelMenu = async () => {
+    await modelBtn.click();
+    const panel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
+    await expect(panel).toBeVisible({ timeout: 10_000 });
+    return panel;
+  };
+
+  const panelOffAuto = await openModelMenu();
+  const autoSwitch = panelOffAuto.getByRole("switch");
+  if (await autoSwitch.isChecked()) {
+    await autoSwitch.click();
+  }
+  await page.keyboard.press("Escape");
+  await expect(panelOffAuto).toBeHidden({ timeout: 5_000 });
+
+  if ((await cot().count()) > 0) {
+    await expect(cot().first()).toBeVisible({ timeout: 20_000 });
+    return;
+  }
+
+  const panelCount = await openModelMenu();
+  const menuRows = panelCount.locator('[data-slot="dropdown-menu-item"]');
+  const n = await menuRows.count();
+  await page.keyboard.press("Escape");
+  await expect(panelCount).toBeHidden({ timeout: 5_000 });
+
+  if (n <= 1) {
+    throw new Error(
+      "§5.9：模型菜单除 Auto 外无其它启用模型，无法展示 Chain of Thought（请在环境启用至少一枚 supportsReasoning 的模型）。",
+    );
+  }
+
+  for (let idx = 1; idx < n; idx++) {
+    const panel = await openModelMenu();
+    const rows = panel.locator('[data-slot="dropdown-menu-item"]');
+    await rows.nth(idx).click();
+    await expect(panel).toBeHidden({ timeout: 5_000 });
+    if ((await cot().count()) > 0) {
+      await expect(cot().first()).toBeVisible({ timeout: 20_000 });
+      return;
+    }
+  }
+
+  throw new Error(
+    "§5.9：已关闭 Auto 并遍历启用模型，仍无 Chain of Thought（当前列表可能均无 supportsReasoning）。",
+  );
+}
+
 /** 通过 Add Context 选中工程内 `chat-uploads/test_upload.png`（不再走 Explore `setInputFiles`，与 §5.2 单次上传一致）。 */
 async function attachTestUploadPngViaAddContext(page: Page, reasLingoInputHost: Locator): Promise<void> {
   await ensureReasLingoVisible(page);
@@ -300,5 +383,117 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await zipBtn.click();
     const download = await downloadPromise;
     expect(download.suggestedFilename().toLowerCase().endsWith(".zip")).toBeTruthy();
+  });
+
+  test.describe("§5.9～5.11 ReasLingo 输入条", () => {
+    /** 默认 1280×720 时侧栏内工具条易被裁切，报告截图看不到 Web Search；略加宽视口。 */
+    test.use({ viewport: { width: 1680, height: 900 } });
+
+  test("5.9 AI会话设置（Chain of Thought）", async ({ page }) => {
+    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await ensureReasLingoVisible(page);
+
+    const { reasLingoInputHost } = reasLingoHosts(page);
+    await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
+    await ensureChainOfThoughtControlVisible(page, reasLingoInputHost);
+
+    const cotBtn = reasLingoInputHost.getByTitle("Chain of Thought");
+    await expect(cotBtn.first()).toBeVisible({ timeout: 5_000 });
+    await cotBtn.first().click();
+    const cotPanel = page
+      .locator('[data-slot="dropdown-menu-content"]')
+      .filter({ visible: true })
+      .filter({ has: page.getByText("None", { exact: true }) })
+      .first();
+    await expect(cotPanel).toBeVisible({ timeout: 10_000 });
+    await cotPanel.getByRole("menuitem").first().click();
+    await expect(cotPanel).toBeHidden({ timeout: 5_000 });
+  });
+
+  test("5.10 AI会话设置（Web Search）", async ({ page }) => {
+    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await ensureReasLingoVisible(page);
+
+    const { reasLingoInputHost } = reasLingoHosts(page);
+    await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
+    await reasLingoInputHost.scrollIntoViewIfNeeded();
+
+    const webSearchBtn = reasLingoInputHost.getByTitle("Web Search").first();
+    await webSearchBtn.scrollIntoViewIfNeeded();
+    await expect(webSearchBtn).toBeVisible({ timeout: 15_000 });
+    await webSearchBtn.click();
+    const webSearchPanel = page
+      .locator('[data-slot="dropdown-menu-content"]')
+      .filter({ visible: true })
+      .filter({ has: page.getByText("Baidu", { exact: true }) })
+      .first();
+    await expect(webSearchPanel).toBeVisible({ timeout: 10_000 });
+    await webSearchPanel.getByRole("menuitem").first().click();
+    await expect(webSearchPanel).toBeHidden({ timeout: 5_000 });
+  });
+
+  test("5.11 AI会话设置（More Settings）", async ({ page }) => {
+    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    await ensureReasLingoVisible(page);
+
+    const { reasLingoInputHost } = reasLingoHosts(page);
+    await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
+
+    const moreSettingsBtn = reasLingoInputHost.getByTitle("More Settings").first();
+    await expect(moreSettingsBtn).toBeVisible({ timeout: 10_000 });
+    await moreSettingsBtn.click();
+    const morePanel = page
+      .locator('[data-slot="dropdown-menu-content"]')
+      .filter({ visible: true })
+      .filter({ has: page.getByText("More Settings", { exact: true }) })
+      .first();
+    await expect(morePanel).toBeVisible({ timeout: 10_000 });
+
+    const settingRows = morePanel.locator("div.space-y-3 > div.space-y-2");
+    await expect(settingRows).toHaveCount(3);
+
+    const tempBlock = settingRows.nth(0);
+    const maxTokensBlock = settingRows.nth(1);
+    const topPBlock = settingRows.nth(2);
+    await expect(tempBlock.getByText("Temperature", { exact: true })).toBeVisible();
+    await expect(maxTokensBlock.getByText("Max output tokens", { exact: true })).toBeVisible();
+    await expect(topPBlock.getByText("Top P", { exact: true })).toBeVisible();
+
+    for (const block of [tempBlock, maxTokensBlock, topPBlock]) {
+      const sw = block.getByRole("switch");
+      if (!(await sw.isChecked())) {
+        await sw.click();
+      }
+      await expect(sw).toBeChecked();
+    }
+
+    await expect(tempBlock.locator('input[type="range"]')).toBeVisible({ timeout: 5_000 });
+    // Switch 内含 `input[type="checkbox"]`（aria-hidden），勿用 `input` 的 first。
+    const maxInput = maxTokensBlock.locator('input[type="number"]');
+    await expect(maxInput).toBeVisible({ timeout: 5_000 });
+    await expect(topPBlock.locator('input[type="range"]')).toBeVisible({ timeout: 5_000 });
+
+    await tempBlock.locator('input[type="range"]').fill("0.7");
+    await expect(tempBlock.getByText("0.70", { exact: true })).toBeVisible({ timeout: 5_000 });
+
+    await maxInput.fill("1024");
+    await expect(maxInput).toHaveValue("1024");
+
+    await topPBlock.locator('input[type="range"]').fill("1");
+    await expect(topPBlock.getByText("1.00", { exact: true })).toBeVisible({ timeout: 5_000 });
+
+    // 配置为 `screenshot: "on"` 时，用例结束截图在 `Escape` 之后，只能得到收起后的工具条（图1）。
+    // 在关闭菜单前附加「展开 More Settings」的截图，便于报告与验收对齐图2（三项开关与数值可见）。
+    await test.info().attach(
+      "5-11-more-settings-open.png",
+      {
+        body: await page.screenshot({ type: "png" }),
+        contentType: "image/png",
+      },
+    );
+
+    await page.keyboard.press("Escape");
+    await expect(morePanel).toBeHidden({ timeout: 5_000 });
+  });
   });
 });
