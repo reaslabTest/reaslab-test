@@ -4,7 +4,7 @@
  * 报告链接：可选 `node send-results/send-feishu.mjs <报告URL>`（有 URL 时发 **interactive** 卡片，带「打开报告」按钮；摘要正文不再含可点击 URL 行）。
  * 摘要 JSON：固定 `test-results/e2e-results.json`。
  * **被测网站 URL**：环境变量 **`E2E_BASE_URL`**（未设置时读 **`common/global-setup.ts`** 的 **`E2E_BASE_URL_DEFAULT`**）用于 **卡片 header 副标题**；摘要正文不再写「被测网站:…」与「--- 报告摘要 ---」。测 `localhost:3000` 时请先 `export E2E_BASE_URL=…` 再跑 `run.mjs`（子进程会继承）。
- * **场景范围（run-scope）**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无 scope 场景数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）；每条功能点后附 **运行时间**（与 HTML 报告一致，取自 Playwright JSON **`results` 末条**的 **`duration`**，如 **`20.2s`** / **`1.2m`**）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。
+ * **场景范围（run-scope）**：`run.mjs` 使用 **`--scope-file`** 时注入 **`E2E_SCOPE_FILE`**。摘要含 **场景汇总**；有报告 URL 的 **interactive** 卡片用飞书 **`table`** 展示「场景｜功能点」（首列 **约 40%**、次列 **约 60%**，随卡片宽度伸缩，避免固定 px 在窄端占满挤压功能点；**左对齐**、**顶对齐**，**`row_height: auto`** + **`row_max_height`** 以免多行功能点被默认 124px 裁切；**`msg_type: text`** 或无 scope 场景数据时仍可用 **GFM 表**（`| :--- | :--- |`）。多行功能点用 **`<br/>`** 换行（无额外空行）；每条功能点后附 **运行时间**（与 HTML 报告一致，取自 Playwright JSON **`results` 末条**的 **`duration`**，如 **`20.2s`** / **`1.2m`**）。第二列着色；第一列场景汇总色：**有红则红**、**全灰则灰**、**否则绿**。**无报告 URL** 时为 **`msg_type: text`**。**失败（场景级）** = 该文件下至少一条用例为 failed/timedOut/interrupted。**场景汇总** 中「成功」仅计首列为绿（至少一条 **passed**）；「灰色」场景（含第二列「无执行记录」、当次 JSON 未对上该场景）不计入成功，与 **`scenarioRollupToneFromItems`** 一致。
  * **飞书 `code=11232` 频率限制**：自动退避重试（默认最多 **6** 次发送，可用 **`FEISHU_WEBHOOK_MAX_ATTEMPTS`** 覆盖，上限 12）。 */
 import fs from "node:fs";
 import path from "node:path";
@@ -442,7 +442,7 @@ function buildProgramSummaryMarkdownTable(scenarioRows) {
 /**
  * 与 `formatPlaywrightSummary` 中 `N > 0` 分支一致：按 scope / JSON 得到有序场景行。
  * @param {object} data Playwright JSON
- * @returns {{ scenarioRows: { heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[], N: number, failedProg: number } | null}
+ * @returns {{ scenarioRows: { heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[], N: number, failedProg: number, successProg: number, greyProg: number } | null}
  */
 function computeScenarioBlock(data) {
   if (!data || typeof data !== "object") {
@@ -459,7 +459,6 @@ function computeScenarioBlock(data) {
   }
   /** @type {{ heading: string, entry: { programHeading: string | null, items: { title: string, tone: "red" | "green" | "grey", flaky: boolean, durationMs: number | null }[] } }[]} */
   const scenarioRows = [];
-  let failedProg = 0;
   for (const sceneId of sceneIdsOrdered) {
     const key = findProgramFileKeyForSceneId(sceneId, featureMap);
     const rawEntry = key ? featureMap.get(key) : undefined;
@@ -468,12 +467,22 @@ function computeScenarioBlock(data) {
     const heading =
       (entry.programHeading && String(entry.programHeading).trim()) ||
       `${sceneId}（${shortName}）`;
-    if (entry.items.some((it) => it.tone === "red")) {
-      failedProg++;
-    }
     scenarioRows.push({ heading, entry });
   }
-  return { scenarioRows, N, failedProg };
+  let failedProg = 0;
+  let successProg = 0;
+  let greyProg = 0;
+  for (const { entry } of scenarioRows) {
+    const t = scenarioRollupToneFromItems(entry);
+    if (t === "red") {
+      failedProg++;
+    } else if (t === "green") {
+      successProg++;
+    } else {
+      greyProg++;
+    }
+  }
+  return { scenarioRows, N, failedProg, successProg, greyProg };
 }
 
 /**
@@ -555,10 +564,11 @@ function formatPlaywrightSummary(data, options = {}) {
   const block = computeScenarioBlock(data);
 
   if (block) {
-    const { scenarioRows, N, failedProg } = block;
-    const successProg = N - failedProg;
+    const { scenarioRows, N, failedProg, successProg, greyProg } = block;
     parts.push(
-      `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个（共 **${N}** 个）`,
+      greyProg > 0
+        ? `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个，灰色 **${greyProg}** 个（共 **${N}** 个；灰色与表内图例一致，含无执行记录或仅有跳过等）`
+        : `场景汇总：成功 **${successProg}** 个，失败 **${failedProg}** 个（共 **${N}** 个）`,
     );
     parts.push(scenarioColorLegendLine(options.htmlLegend));
     if (failureTable && !nativeFeishuTable) {
