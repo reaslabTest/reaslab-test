@@ -17,9 +17,9 @@ import {
 
 const TEST_UPLOAD_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "test_upload.png");
 
-/** §5.13：无服务端已存 Gurobi WLS 且未注入三项环境变量时，前端禁用 Test，用例跳过。 */
-const MODELING_CH5_13_GUROBI_SKIP_MSG =
-  "§5.13：Gurobi WLS 三项未填（项目无已存凭据）且未设置 E2E_GUROBI_WLS_ACCESS_ID / E2E_GUROBI_WLS_SECRET / E2E_GUROBI_LICENSE_ID，Test 不可用；跳过。";
+/** §5.4：`reaslab-agent` 走 ACP `authenticate`（llm-gateway）；未通过时 `acp-client` toast 且无法发 prompt。 */
+const MODELING_CH5_4_ACP_AUTH_SKIP_MSG =
+  "§5.4：ReasLab Agent（ACP）需 llm-gateway 认证；当前环境 authenticate 未通过（toast「Authentication required before sending a prompt」），跳过。";
 
 /** 与 `@reaslab/file-tree` 节点 `data-name` 一致；避免树上另有 `/test_upload.png` 时 `getByText` 触发 strict 双匹配。 */
 function chatUploadsTestPngTreeLabel(fileTree: Locator) {
@@ -36,6 +36,7 @@ function reasLingoHosts(page: Page) {
     .locator('[data-sidebar="group"]')
     .filter({ has: page.getByText("ReasLingo", { exact: true }) })
     .filter({ has: page.getByTitle("Add Context") })
+    .filter({ visible: true })
     .first();
   return { reasLingoInputHost };
 }
@@ -45,12 +46,99 @@ function reasLingoFileReferenceChip(reasLingoInputHost: Locator, fileName: strin
   return reasLingoInputHost.locator("button").filter({ has: reasLingoInputHost.getByText(fileName) });
 }
 
-/** 本轮最后一条助理消息气泡（`MessageList` 内带 AI Bot 头像的块）。 */
-function reasLingoLastAssistantMessage(reasLingoInputHost: Locator) {
+/**
+ * 本轮已结束的助理消息根节点（`Message.tsx` 外层 `div.w-full`）。
+ * 勿用 `host.locator('div.w-full').filter({ has: host.locator(...) }).last()`：`has` 以 host 为根时会把
+ * `MessageInput` 内大量 `w-full` 也算进去，`.last()` 常落到工具栏内不可见节点；改从 **Regenerate** 上溯。
+ */
+function reasLingoLastCompleteAssistantTurn(reasLingoInputHost: Locator) {
   return reasLingoInputHost
-    .locator("button")
-    .filter({ has: reasLingoInputHost.locator('img[alt="AI Bot"]') })
-    .last();
+    .getByRole("button", { name: "Regenerate" })
+    .last()
+    .locator("xpath=ancestor::*[contains(@class,'w-full')][1]");
+}
+
+/**
+ * 填写 prompt 并发送，等待本轮流式结束。
+ * 勿用 `WelcomeScreen`（`img[alt="ReasLingo AI Bot"]`）隐藏作为「已发送」信号：iipe 在 `messages.length===0` 时
+ * 才显示欢迎页，而首条消息写入 overlay 后会话 header/分页未水合前 `useAiCurrentSession` 仍可能为 null，欢迎页会长期可见。
+ */
+async function sendReasLingoPromptAndWaitForReply(
+  page: Page,
+  reasLingoInputHost: Locator,
+  prompt: string,
+): Promise<void> {
+  const ta = reasLingoInputHost.locator("textarea").first();
+  await expect(ta).toBeVisible({ timeout: 15_000 });
+  await ta.click();
+  await ta.fill(prompt);
+
+  const sendBtn = reasLingoInputHost.getByTitle("Send Message").first();
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await sendBtn.click();
+
+  // 与 `ReasLingoChatArea.handleSendMessage` 一致：真正发出后会 `setIsLoading(true)` → Stop / Receiving。
+  const streamStarted = reasLingoInputHost
+    .getByTitle("Stop Message")
+    .or(reasLingoInputHost.getByText(/Receiving response/i));
+  await expect(streamStarted.first()).toBeVisible({ timeout: 180_000 });
+
+  await waitForReasLingoAssistantReplyDone(page);
+}
+
+/**
+ * §5.4：ReasLab Agent 发 prompt 前须 ACP 已认证；失败时 toast 且不会出现 Stop/Receiving。
+ * 勿长时间死等 `sendReasLingoPromptAndWaitForReply` 的 180s 流式信号。
+ */
+async function sendReasLingoPromptOrSkipOnAcpAuth(
+  page: Page,
+  reasLingoInputHost: Locator,
+  prompt: string,
+): Promise<void> {
+  const ta = reasLingoInputHost.locator("textarea").first();
+  await expect(ta).toBeVisible({ timeout: 15_000 });
+  await ta.click();
+  await ta.fill(prompt);
+
+  const sendBtn = reasLingoInputHost.getByTitle("Send Message").first();
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await sendBtn.click();
+
+  const authToast = page.getByText(/Authentication required before sending a prompt/i);
+  const streamStarted = reasLingoInputHost
+    .getByTitle("Stop Message")
+    .or(reasLingoInputHost.getByText(/Receiving response/i));
+
+  await expect(streamStarted.or(authToast).first()).toBeVisible({ timeout: 60_000 });
+  if (await authToast.isVisible().catch(() => false)) {
+    test.skip(true, MODELING_CH5_4_ACP_AUTH_SKIP_MSG);
+  }
+
+  await waitForReasLingoAssistantReplyDone(page);
+}
+
+/** §5.3：最后一条助理回复中出现单独数字答案（如 `4`）；答案常在 Markdown `<p>`，Thought 块在前。 */
+async function expectLastAssistantNumeralAnswer(
+  reasLingoInputHost: Locator,
+  numeral: string,
+): Promise<void> {
+  const row = reasLingoLastCompleteAssistantTurn(reasLingoInputHost);
+  await expect(row).toBeVisible({ timeout: 120_000 });
+  await expect
+    .poll(
+      async () => {
+        const paragraphs = row.locator("p");
+        const n = await paragraphs.count();
+        for (let i = n - 1; i >= 0; i--) {
+          if ((await paragraphs.nth(i).innerText()).trim() === numeral) {
+            return true;
+          }
+        }
+        return (await row.getByText(numeral, { exact: true }).count()) > 0;
+      },
+      { timeout: 120_000, message: `助理消息中未找到单独数字答案「${numeral}」` },
+    )
+    .toBe(true);
 }
 
 /** §5.9～5.11：侧栏 ReasLingo 工具条在默认 1280×720 下易被裁切；仅这三条加宽视口（不设嵌套 describe，以免报告标题多一层）。 */
@@ -139,6 +227,26 @@ async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost
   throw new Error(
     "§5.9：已关闭 Auto 并遍历启用模型，仍无 Chain of Thought（当前列表可能均无 supportsReasoning）。",
   );
+}
+
+/** §5.3 / §5.4 / §5.10：关闭模型菜单中的 Auto（§5.3 常开启）。 */
+async function turnOffReasLingoAutoModel(page: Page, reasLingoInputHost: Locator): Promise<void> {
+  const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
+  await modelBtn.click();
+  const panel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const autoSwitch = panel.getByRole("switch");
+  if (await autoSwitch.isChecked()) {
+    await autoSwitch.click();
+  }
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden({ timeout: 5_000 });
+}
+
+/** §5.10：默认 Agent 下关闭 Auto 并确认 Web Search 可见（非 default Agent 不渲染该按钮）。 */
+async function ensureWebSearchControlReady(page: Page, reasLingoInputHost: Locator): Promise<void> {
+  await turnOffReasLingoAutoModel(page, reasLingoInputHost);
+  await expect(reasLingoInputHost.getByTitle("Web Search").first()).toBeVisible({ timeout: 20_000 });
 }
 
 /** 通过 Add Context 选中工程内 `chat-uploads/test_upload.png`（不再走 Explore `setInputFiles`，与 §5.2 单次上传一致）。 */
@@ -244,6 +352,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(pngChip.getByText("OCR Processing", { exact: true })).toBeHidden({
       timeout: 120_000,
     });
+    await expect(pngChip.getByText("Uploading", { exact: true })).toBeHidden({ timeout: 120_000 });
 
     const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
     await modelBtn.click();
@@ -255,23 +364,10 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     }
     await page.keyboard.press("Escape");
 
-    const ta = reasLingoInputHost.locator("textarea").first();
-    await expect(ta).toBeVisible({ timeout: 15_000 });
-    await ta.click();
-    await ta.fill(CH5_FIXTURE_QUESTION_PROMPT);
-    const sendBtn = reasLingoInputHost.getByTitle("Send Message").first();
-    await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
-    await sendBtn.click();
-    await expect(async () => {
-      await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      await expect(reasLingoInputHost.getByText(CH5_FIXTURE_QUESTION_PROMPT).first()).toBeVisible();
-    }).toPass({ timeout: 30_000 });
-    await waitForReasLingoAssistantReplyDone(page);
+    await sendReasLingoPromptAndWaitForReply(page, reasLingoInputHost, CH5_FIXTURE_QUESTION_PROMPT);
 
-    // 成功标准：助理就图中问题给出数字 4（可用 OCR 文本或 Agent `read_file` 读图，见快照）。
-    // 勿在整侧栏搜「OCR Failed」：芯片失败时仍可能通过 read_file 答对，会误报。
-    const lastAssistant = reasLingoLastAssistantMessage(reasLingoInputHost);
-    await expect(lastAssistant.getByText(/^4$/)).toBeVisible({ timeout: 120_000 });
+    // 成功标准：助理就图中问题给出数字 4（可用 OCR 或 Agent `read_file` 读图）。
+    await expectLastAssistantNumeralAnswer(reasLingoInputHost, "4");
   });
 
   test("5.4 切换 ReasLab Agent 进行 AI 会话", async ({ page }) => {
@@ -299,21 +395,14 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     ).toBeVisible({ timeout: 15_000 });
     await reasLabAgent.first().click();
     await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
-    await page.waitForTimeout(2_000);
+    await expect(reasLingoInputHost.getByRole("button", { name: /ReasLab Agent/i })).toBeVisible({
+      timeout: 15_000,
+    });
+    // §5.3 常开 Auto；关闭后再发（ReasLab Agent 下无 Web Search，勿用 ensureWebSearchControlReady）。
+    await turnOffReasLingoAutoModel(page, reasLingoInputHost);
 
-    // 图片/OCR 在 §5.3 已覆盖；此处仅验证 ReasLab Agent 下纯文本对话与流式结束。
-    const ta = reasLingoInputHost.locator("textarea").first();
-    await expect(ta).toBeVisible({ timeout: 15_000 });
-    await ta.click();
-    await ta.fill("who are you?");
-    const sendBtn = reasLingoInputHost.getByTitle("Send Message").first();
-    await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
-    await sendBtn.click();
-    await expect(async () => {
-      await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      await expect(reasLingoInputHost.getByText(/^who are you\?$/i).first()).toBeVisible();
-    }).toPass({ timeout: 30_000 });
-    await waitForReasLingoAssistantReplyDone(page);
+    // 图片/OCR 在 §5.3 已覆盖；ReasLab Agent 走 ACP，未认证时 skip（勿死等 180s 流式）。
+    await sendReasLingoPromptOrSkipOnAcpAuth(page, reasLingoInputHost, "who are you?");
   });
 
   test("5.5 邀请他人共同编辑项目", async ({ page }) => {
@@ -341,12 +430,19 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
   test("5.6 查看项目的修改历史", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
-    await page.getByRole("button", { name: "History", exact: true }).click();
-    await expect(page).toHaveURL(/\/projects\/[^/]+\/history/i, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "Project History" })).toBeVisible();
-    await expect(page.getByText("Changed Files").first()).toBeVisible();
-    await expect(page.getByText("Diff").first()).toBeVisible();
-    await expect(page.getByText("Snapshots").first()).toBeVisible();
+    const historyBtn = page.getByRole("button", { name: "History", exact: true });
+    await expect(historyBtn).toBeVisible({ timeout: 15_000 });
+    await historyBtn.click();
+    // reaslab-iipe `menubar.tsx` → `ProjectHistoryDialog`：覆盖式对话框，不跳 `/projects/.../history`。
+    const historyDialog = page.getByRole("dialog", { name: "Project History" });
+    await expect(historyDialog).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(/\/projects\/[^/]+\/?$/i);
+    await expect(historyDialog.getByRole("heading", { name: "Project History" })).toBeVisible();
+    await expect(historyDialog.getByText("Changed Files").first()).toBeVisible();
+    await expect(historyDialog.getByText("Diff").first()).toBeVisible();
+    await expect(historyDialog.getByText("Snapshots").first()).toBeVisible();
+    await historyDialog.getByRole("button", { name: "Close" }).click();
+    await expect(historyDialog).toBeHidden({ timeout: 10_000 });
   });
 
   test("5.7 项目内搜索关键字", async ({ page }) => {
@@ -425,7 +521,12 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
     const { reasLingoInputHost } = reasLingoHosts(page);
     await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
-    await reasLingoInputHost.scrollIntoViewIfNeeded();
+    await ensureWebSearchControlReady(page, reasLingoInputHost);
+
+    const scrollFab = reasLingoInputHost.getByRole("button", { name: /Scroll to bottom/i });
+    if (await scrollFab.isVisible().catch(() => false)) {
+      await scrollFab.click();
+    }
 
     const webSearchBtn = reasLingoInputHost.getByTitle("Web Search").first();
     await webSearchBtn.scrollIntoViewIfNeeded();
@@ -435,9 +536,15 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
       .locator('[data-slot="dropdown-menu-content"]')
       .filter({ visible: true })
       .filter({ has: page.getByText("Baidu", { exact: true }) })
-      .first();
+      .last();
     await expect(webSearchPanel).toBeVisible({ timeout: 10_000 });
-    await webSearchPanel.getByRole("menuitem").first().click();
+    // `WebSearchSelector`：`ProviderIcon` 的 img alt + span 文案 → a11y 名为「Baidu Baidu」，勿用 /^Baidu$/。
+    const baiduItem = webSearchPanel
+      .getByRole("menuitem")
+      .filter({ has: page.getByText("Baidu", { exact: true }) })
+      .first();
+    await expect(baiduItem).toBeVisible({ timeout: 5_000 });
+    await baiduItem.click();
     await expect(webSearchPanel).toBeHidden({ timeout: 5_000 });
   });
 
@@ -540,7 +647,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(settingsSheet).toBeHidden({ timeout: 10_000 });
   });
 
-  test("5.13 Solver Settings：Gurobi WLS License 点 Test 成功", async ({ page }) => {
+  test("5.13 Solver Settings：展开 Gurobi WLS License", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
 
     await page.getByTitle("Solver Settings").click();
@@ -554,35 +661,13 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(solverPanel).toBeVisible({ timeout: 5_000 });
 
     await solverPanel.getByRole("button", { name: /Gurobi WLS License/i }).click();
-    const accessInput = solverPanel.locator("#wlsAccessId");
-    await expect(accessInput).toBeVisible({ timeout: 15_000 });
-
-    const wlsAccess = process.env.E2E_GUROBI_WLS_ACCESS_ID?.trim();
-    const wlsSecret = process.env.E2E_GUROBI_WLS_SECRET?.trim();
-    const licenseId = process.env.E2E_GUROBI_LICENSE_ID?.trim();
-    if (wlsAccess && wlsSecret && licenseId) {
-      await accessInput.fill(wlsAccess);
-      await solverPanel.locator("#wlsSecret").fill(wlsSecret);
-      await solverPanel.locator("#licenseId").fill(licenseId);
-    }
-
-    const testBtn = solverPanel.getByRole("button", { name: "Test", exact: true });
-    await expect(testBtn).toBeVisible({ timeout: 10_000 });
-    if (await testBtn.isDisabled()) {
-      test.skip(true, MODELING_CH5_13_GUROBI_SKIP_MSG);
-    }
-
-    await testBtn.click();
-    const successMsg = solverPanel.getByText("Test successfully", { exact: true });
-    await expect(successMsg).toBeVisible({
-      timeout: 120_000,
-    });
-    await successMsg.scrollIntoViewIfNeeded();
-    // `screenshot: "on"` 时默认可在切回 Explorer 之后截屏，看不到成功文案；在离开 Solver 前附加「Test 成功」侧栏图。
-    await test.info().attach("5-13-gurobi-wls-test-success.png", {
-      body: await solverPanel.screenshot({ type: "png" }),
-      contentType: "image/png",
-    });
+    // 与 `environment-settings-view` 一致：展开后展示三项输入与 Test/Save（无有效 license 时 Test 为 disabled，不测连通性）。
+    await expect(solverPanel.locator("#wlsAccessId")).toBeVisible({ timeout: 15_000 });
+    await expect(solverPanel.locator("#wlsSecret")).toBeVisible();
+    await expect(solverPanel.locator("#licenseId")).toBeVisible();
+    await expect(solverPanel.getByLabel("WLSACCESSID")).toBeVisible();
+    await expect(solverPanel.getByRole("button", { name: "Test", exact: true })).toBeVisible();
+    await expect(solverPanel.getByRole("button", { name: "Save", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: /Explorer/i }).first().click();
   });

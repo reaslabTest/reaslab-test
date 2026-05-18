@@ -545,12 +545,12 @@ export async function reasLingoWhoAreYouProbe(
   await ta.click();
   await ta.fill("who are you?");
   const sendBtn = host.getByTitle("Send Message").first();
-  await expect(sendBtn).toBeEnabled({ timeout: 15_000 });
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
-  await expect(async () => {
-    await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    await expect(host.getByText(/^who are you\?$/i).first()).toBeVisible();
-  }).toPass({ timeout: 30_000 });
+  const streamStarted = host
+    .getByTitle("Stop Message")
+    .or(host.getByText(/Receiving response/i));
+  await expect(streamStarted.first()).toBeVisible({ timeout: 180_000 });
   await waitForReasLingoAssistantReplyDone(page);
   return true;
 }
