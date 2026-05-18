@@ -4,7 +4,8 @@ import { absUrl } from "../common/global-setup";
 
 /**
  * **用户场景 §11**：页脚导航链接可正常跳转（见 `docs/用户场景.md`）。
- * 覆盖：`app/home/footer.tsx` 中 **Templates** / **Resources** / **About** 各链接；页脚均为 **`target="_blank"`**，本用例通过 **`popup`** 断言目标页可达且 URL 符合预期。
+ * 覆盖：`reaslab-iipe` `app/home/footer.tsx` 中 **Products** / **Templates** / **Resources** / **About**；
+ * 外链与模板列为 **`target="_blank"`**（popup）；**Products** 为站内 **`Link`**（同页跳转）。
  *
  * 单文件调试：`pnpm run test:11:headed`
  */
@@ -41,6 +42,26 @@ async function assertFooterLinkOpensPopup(
   }
 }
 
+/** `footer.tsx` **Products** 使用 React Router `Link`，无 `target="_blank"`。 */
+async function assertFooterLinkNavigatesSameTab(
+  page: Page,
+  linkText: string,
+  urlPredicate: (absoluteUrl: string) => boolean,
+): Promise<void> {
+  const footer = page.locator("footer");
+  await footer.scrollIntoViewIfNeeded();
+  const link = footer.getByRole("link", { name: linkText, exact: true });
+  await expect(link).toBeVisible({ timeout: 60_000 });
+  await expect(link).not.toHaveAttribute("target", "_blank");
+  await link.click();
+  await expect
+    .poll(() => urlPredicate(page.url()), {
+      timeout: 60_000,
+      message: `同页跳转 URL 不符合预期：${page.url()}`,
+    })
+    .toBe(true);
+}
+
 function pathnameMatches(re: RegExp): (u: string) => boolean {
   return (u: string) => {
     try {
@@ -69,6 +90,15 @@ test.describe("11. 页脚导航链接", () => {
   test("11.1 检查模板/资源/关于", async ({ page }) => {
     await gotoMarketingHome(page);
 
+    await test.step("Products · Mathematical Modeling → /model", async () => {
+      await assertFooterLinkNavigatesSameTab(page, "Mathematical Modeling", pathnameMatches(/^\/model\/?$/i));
+    });
+
+    await test.step("Products · Theorem Prove → /prove", async () => {
+      await assertFooterLinkNavigatesSameTab(page, "Theorem Prove", pathnameMatches(/^\/prove\/?$/i));
+      await gotoMarketingHome(page);
+    });
+
     await test.step("Templates · Optimization Modeling → /modeling-templates", async () => {
       await assertFooterLinkOpensPopup(page, "Optimization Modeling", pathnameMatches(/^\/modeling-templates\/?$/i));
     });
@@ -93,15 +123,15 @@ test.describe("11. 页脚导航链接", () => {
       );
     });
 
-    await test.step("Resources · Lean Documentation → lean-lang.org", async () => {
-      await assertFooterLinkOpensPopup(page, "Lean Documentation", hostnameOneOf("lean-lang.org"));
+    await test.step("Resources · Blog → blog.reaslab.io", async () => {
+      await assertFooterLinkOpensPopup(page, "Blog", hostnameOneOf("blog.reaslab.io"));
     });
 
-    await test.step("Resources · Mathematical Formalization → PKU 文档站", async () => {
+    await test.step("Resources · Publications → blog.reaslab.io/publications", async () => {
       await assertFooterLinkOpensPopup(
         page,
-        "Mathematical Formalization",
-        (u) => hostnameOneOf("faculty.bicmr.pku.edu.cn")(u) && /formal/i.test(u),
+        "Publications",
+        (u) => hostnameOneOf("blog.reaslab.io")(u) && /\/publications/i.test(u),
       );
     });
 
