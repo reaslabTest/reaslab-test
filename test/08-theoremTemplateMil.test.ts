@@ -2,8 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   MIL_GETTING_STARTED_SEGMENTS,
+  REASFLOW_COPILOT_AGENT_MENU_LABEL,
   THEOREM_CH8_LAKE_MCP_SKIP_MSG,
   THEOREM_CH8_LEAN_MCP_SKIP_MSG,
+  THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG,
   THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG,
   THEOREM_CH8_SKIP_MSG,
   milSemanticSearchAndLeanToolbarProbe,
@@ -92,10 +94,10 @@ test.describe("8. 模板创建定理证明项目", () => {
     test.skip(!ok, THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG);
   });
 
-  test("8.4 切换Paper Copilot 并提问", async ({ page }) => {
+  test("8.4 切换 ReasFlow Copilot 并提问", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
-    const ok = await reasLingoWhoAreYouProbe(page, /Paper Copilot/i);
-    test.skip(!ok, "当前环境无 Paper Copilot Agent，跳过 8.4 切换Paper Copilot 并提问。");
+    const ok = await reasLingoWhoAreYouProbe(page, REASFLOW_COPILOT_AGENT_MENU_LABEL);
+    test.skip(!ok, THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG);
   });
 
   /**
