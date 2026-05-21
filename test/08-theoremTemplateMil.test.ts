@@ -8,6 +8,7 @@ import {
   THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG,
   THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG,
   THEOREM_CH8_SKIP_MSG,
+  ensureReasLingoVisible,
   milSemanticSearchAndLeanToolbarProbe,
   openLeafFile,
   reasLingoDefaultAgentLakeMcpBuildProbe,
@@ -96,6 +97,7 @@ test.describe("8. 模板创建定理证明项目", () => {
 
   test("8.4 切换 ReasFlow Copilot 并提问", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
+    await ensureReasLingoVisible(page);
     const ok = await reasLingoWhoAreYouProbe(page, REASFLOW_COPILOT_AGENT_MENU_LABEL);
     test.skip(!ok, THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG);
   });

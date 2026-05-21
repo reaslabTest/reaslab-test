@@ -13,6 +13,7 @@ import {
   openFirstPythonFileRowInFileTree,
   openLeafFile,
   readFirstPythonDataNameFromIdeFileTree,
+  ensureReasLingoVisible,
   reasLingoDefaultAgentMcpPythonProbe,
   reasLingoIdeSettingsAiFlow,
   reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou,
@@ -86,7 +87,8 @@ test.describe("7. 模板创建优化建模项目", () => {
 
   test("7.3 切换Optimization Agent并提问", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
-    const ok = await reasLingoWhoAreYouProbe(page, /Optimization/i);
+    await ensureReasLingoVisible(page);
+    const ok = await reasLingoWhoAreYouProbe(page, /Optimization Agent/i);
     test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 切换Optimization Agent并提问。");
   });
 

@@ -9,6 +9,8 @@ import {
   MODELING_CH5_SKIP_MSG,
   ensureReasLingoVisible,
   expandIdeFileTreeRowByLabel,
+  reasLingoAttachProjectFileViaAtMention,
+  reasLingoInputHostLocator,
   reaslingoUploadFileForAiChat,
   tryEnterModelingProjectIde,
   waitForFileTree,
@@ -31,19 +33,14 @@ const CH5_FIXTURE_QUESTION_PROMPT =
   "Answer the question shown in the image. Reply with exactly one Arabic numeral and nothing else.";
 
 function reasLingoHosts(page: Page) {
-  // 与输入区强绑定：勿依赖 `title="Switch Agent"`（线上多为「Agent」按钮，无该 title）。
-  const reasLingoInputHost = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .filter({ visible: true })
-    .first();
-  return { reasLingoInputHost };
+  return { reasLingoInputHost: reasLingoInputHostLocator(page) };
 }
 
-/** `FileReferences` 中单个附件芯片（含 OCR Processing / OCR Failed 标签）。 */
+/** `FileReferences.tsx` 附件芯片（`div.rounded-lg`，含 OCR Processing / OCR Failed 标签）。 */
 function reasLingoFileReferenceChip(reasLingoInputHost: Locator, fileName: string) {
-  return reasLingoInputHost.locator("button").filter({ has: reasLingoInputHost.getByText(fileName) });
+  return reasLingoInputHost
+    .getByText(fileName, { exact: true })
+    .locator("xpath=ancestor::div[contains(@class,'rounded-lg')][1]");
 }
 
 /**
@@ -249,43 +246,10 @@ async function ensureWebSearchControlReady(page: Page, reasLingoInputHost: Locat
   await expect(reasLingoInputHost.getByTitle("Web Search").first()).toBeVisible({ timeout: 20_000 });
 }
 
-/** 通过 Add Context 选中工程内 `chat-uploads/test_upload.png`（不再走 Explore `setInputFiles`，与 §5.2 单次上传一致）。 */
-async function attachTestUploadPngViaAddContext(page: Page, reasLingoInputHost: Locator): Promise<void> {
+/** 通过 `@` 提及选中工程内 `chat-uploads/test_upload.png`（不再走 Explore `setInputFiles`，与 §5.2 单次上传一致）。 */
+async function attachTestUploadPngViaAtMention(page: Page, reasLingoInputHost: Locator): Promise<void> {
   await ensureReasLingoVisible(page);
-  const addContext = reasLingoInputHost.getByTitle("Add Context").first();
-  await expect(addContext).toBeVisible({ timeout: 20_000 });
-  await addContext.scrollIntoViewIfNeeded();
-  await addContext.click();
-  const ctxSearch = page.getByPlaceholder("Add files, folders, docs...");
-  await expect(ctxSearch).toBeVisible({ timeout: 10_000 });
-  // 搜 `test_upload` 会同时命中 `test_upload.md` / `test_upload.png`；勿用 ArrowDown+Enter（首项常为 .md）——必须点选 **.png**。
-  await ctxSearch.fill("test_upload");
-  const addCtxPopper = page
-    .locator("[data-radix-popper-content-wrapper]")
-    .filter({ visible: true })
-    .filter({ has: page.getByPlaceholder("Add files, folders, docs...") })
-    .last();
-  const resultInPopper = addCtxPopper.getByText("test_upload.png", { exact: true }).first();
-  const listboxRow = page
-    .getByRole("listbox")
-    .filter({ visible: true })
-    .filter({ hasNot: page.locator(".ide-filetree") })
-    .first()
-    .getByText("test_upload.png", { exact: true })
-    .first();
-  const looseResultRow = page
-    .locator("div")
-    .filter({ visible: true })
-    .filter({ has: ctxSearch })
-    .filter({ has: page.getByText("test_upload.png", { exact: true }) })
-    .getByText("test_upload.png", { exact: true })
-    .first();
-  const pngHit = resultInPopper.or(listboxRow).or(looseResultRow).first();
-  await expect(pngHit).toBeVisible({ timeout: 30_000 });
-  await pngHit.click();
-  await ctxSearch.waitFor({ state: "detached", timeout: 15_000 }).catch(() =>
-    ctxSearch.waitFor({ state: "hidden", timeout: 15_000 }),
-  );
+  await reasLingoAttachProjectFileViaAtMention(page, reasLingoInputHost, "test_upload.png", "test_upload");
 }
 
 test.describe("5. 创建空白项目并使用基础功能", () => {
@@ -339,14 +303,14 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
     const { reasLingoInputHost } = reasLingoHosts(page);
 
-    // §5.2 已 Explore 上传一次；此处不再 `setInputFiles`，仅用 Add Context 引用工程内文件，避免重复上传。
+    // §5.2 已 Explore 上传一次；此处不再 `setInputFiles`，仅用 `@` 提及引用工程内文件，避免重复上传。
     await waitForFileTree(page);
     const fileTreePanel = page.locator(".ide-filetree").filter({ visible: true }).first();
     await expandIdeFileTreeRowByLabel(page, /chat-uploads/i);
     await expect(chatUploadsTestPngTreeLabel(fileTreePanel)).toBeVisible({
       timeout: 180_000,
     });
-    await attachTestUploadPngViaAddContext(page, reasLingoInputHost);
+    await attachTestUploadPngViaAtMention(page, reasLingoInputHost);
 
     const pngChip = reasLingoFileReferenceChip(reasLingoInputHost, "test_upload.png");
     await expect(pngChip.getByText("OCR Processing", { exact: true })).toBeHidden({

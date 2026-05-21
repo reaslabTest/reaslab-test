@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  ensureReasLingoVisible,
   MODELING_CH5_SKIP_MSG,
   reasLingoDefaultAgentTexMcpCompileLogProbe,
   tryEnterModelingProjectIde,
@@ -112,6 +113,7 @@ test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
     });
 
     await test.step("ReasLingo：Default Agent → New Chat → 英文探针与工具顺序", async () => {
+      await ensureReasLingoVisible(page);
       await reasLingoDefaultAgentTexMcpCompileLogProbe(page);
     });
   });

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   E2E_DEFAULT_IMPORT_GIT_URL,
+  ensureReasLingoVisible,
   manualImportGitAndEnterIde,
   reasLingoWhoAreYouProbe,
 } from "./helpers";
@@ -39,6 +40,7 @@ test.describe("6. 从 Git 导入项目", () => {
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
     await test.step("§6 步骤 6：ReasLingo 默认 Agent，who are you?", async () => {
+      await ensureReasLingoVisible(page);
       await reasLingoWhoAreYouProbe(page, null);
     });
   });

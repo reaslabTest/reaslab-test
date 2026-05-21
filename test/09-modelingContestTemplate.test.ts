@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  ensureReasLingoVisible,
   MODELING_CH9_SKIP_MSG,
   MODELING_CH9_STANDALONE_CHAT_SKIP_MSG,
   openLeafFile,
@@ -72,6 +73,7 @@ test.describe("9. 模板创建竞赛建模项目", () => {
 
   test("9.3 切换Math Modeling并提问", async ({ page }) => {
     test.skip(!(await tryEnterContestTemplateModelingIde(page)), MODELING_CH9_SKIP_MSG);
+    await ensureReasLingoVisible(page);
     const ok = await reasLingoWhoAreYouProbe(page, /Math Modeling/i);
     test.skip(!ok, "当前环境无 Math Modeling Agent，跳过 9.3 切换Math Modeling并提问。");
   });

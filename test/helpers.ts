@@ -318,6 +318,56 @@ export async function ensureReasLingoVisible(page: Page): Promise<void> {
 }
 
 /**
+ * reaslab-iipe 侧栏 ReasLingo 输入区（`MessageInput`）。
+ * 旧版 **Add Context** 已改为 **`@` 提及**（`AtMentionPopover.tsx`）+ **`title="Upload Files for AI Chat"`**。
+ */
+export function reasLingoInputHostLocator(page: Page): Locator {
+  return page
+    .locator('[data-sidebar="group"]')
+    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .filter({
+      has: page
+        .getByTitle("Upload Files for AI Chat")
+        .or(page.getByRole("textbox"))
+        .or(page.getByTitle("Send Message")),
+    })
+    .filter({ visible: true })
+    .first();
+}
+
+/** `MessageInput` 主输入：HTML `<textarea>`，无障碍树为 **textbox**。 */
+export function reasLingoPromptInput(reasLingoInputHost: Locator): Locator {
+  return reasLingoInputHost.getByRole("textbox").or(reasLingoInputHost.locator("textarea")).first();
+}
+
+/** 在 ReasLingo 输入框用 `@` 选中工程内已有文件（与 `useAtMention` / `AtMentionPopover` 一致）。 */
+export async function reasLingoAttachProjectFileViaAtMention(
+  page: Page,
+  reasLingoInputHost: Locator,
+  fileName: string,
+  searchQuery?: string,
+): Promise<void> {
+  const query = searchQuery ?? fileName.replace(/\.[^/.]+$/u, "");
+  const ta = reasLingoPromptInput(reasLingoInputHost);
+  await expect(ta).toBeVisible({ timeout: 20_000 });
+  await ta.click();
+  await ta.fill(`@${query}`);
+
+  const mentionList = page
+    .getByRole("listbox")
+    .filter({ visible: true })
+    .filter({ hasNot: page.locator(".ide-filetree") });
+  await expect(mentionList.first()).toBeVisible({ timeout: 15_000 });
+
+  const option = mentionList
+    .getByRole("option")
+    .filter({ has: page.getByText(fileName, { exact: true }) })
+    .first();
+  await expect(option).toBeVisible({ timeout: 30_000 });
+  await option.click();
+}
+
+/**
  * 将本地文件上传到项目的 **`chat-uploads/`** 下，供 §5.2～§5.4 等 ReasLingo 用例使用。
  *
  * **与当前产品、手动成功路径一致**：左侧 Explore 工具栏 **`title="Upload Files"`**（`file-tree-toolbar`）
@@ -482,11 +532,7 @@ export async function expandIdeFileTreeRowByLabel(page: Page, rowLabel: string |
  * 否则后续断言会在仍在生成时开始，导致超时误报。
  */
 export async function waitForReasLingoAssistantReplyDone(page: Page): Promise<void> {
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
 
   const stopBtn = host.getByTitle("Stop Message");
   const receiving = host.getByText(/Receiving response/i);
@@ -516,11 +562,7 @@ export async function reasLingoWhoAreYouProbe(
   agentMenuLabel: RegExp | null,
 ): Promise<boolean> {
   await ensureReasLingoVisible(page);
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   if (agentMenuLabel) {
@@ -540,7 +582,7 @@ export async function reasLingoWhoAreYouProbe(
     await page.waitForTimeout(2_000);
   }
 
-  const ta = host.locator("textarea").first();
+  const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
   await ta.fill("who are you?");
@@ -557,7 +599,7 @@ export async function reasLingoWhoAreYouProbe(
 
 /**
  * **`docs/用户场景.md` §9.4**：侧栏 **ReasLingo** 标题栏 **`title="Standalone Chat Mode"`**（**`ReasLingoHeader.tsx`**）→
- * 断言 **`[data-standalone-chat]`**（**`StandaloneChatView`** Portal）内 **History**、**Search conversations…**、**Add Context**；
+ * 断言 **`[data-standalone-chat]`**（**`StandaloneChatView`** Portal）内 **History**、**Search conversations…**、ReasLingo 输入区；
  * 桌面默认右侧 **Activity** 面板；并断言 **`title="Switch to IDE Mode"`** 可见（**不点击**），以便用例结束时页面仍处全屏、报告截图为全屏态。
  *
  * @returns 未找到全屏入口或全屏层未挂载时返回 **`false`**（调用方 **`test.skip`**）。
@@ -577,7 +619,9 @@ export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promis
   }
   await expect(shell.getByText("History", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(shell.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 15_000 });
-  await expect(shell.getByTitle("Add Context").first()).toBeVisible({ timeout: 15_000 });
+  await expect(
+    shell.getByTitle("Upload Files for AI Chat").or(shell.locator("textarea")).first(),
+  ).toBeVisible({ timeout: 15_000 });
   await expect(shell.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(shell.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
   return true;
@@ -595,11 +639,7 @@ export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promis
  */
 export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   const trigger = host.getByRole("button", { name: /^Agent$/i }).or(host.locator('button[title="Switch Agent"]'));
@@ -647,7 +687,7 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
     "Reply with one verbatim substring copied only from the MCP tool result (no paraphrase).",
   ].join(" ");
 
-  const ta = host.locator("textarea").first();
+  const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
   await ta.fill(prompt);
@@ -715,11 +755,7 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
  */
 export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   const trigger = host.getByRole("button", { name: /^Agent$/i }).or(host.locator('button[title="Switch Agent"]'));
@@ -759,7 +795,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
     "Reply with ONE verbatim substring copied only from the MCP tool result (the summary line is best), e.g. containing status=Success.",
   ].join(" ");
 
-  const ta = host.locator("textarea").first();
+  const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
   await ta.fill(prompt);
@@ -822,17 +858,13 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
   projectPyDataName: string,
 ): Promise<void> {
   await ensureReasLingoVisible(page);
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   const rel = projectPyDataName.startsWith("/") ? projectPyDataName.slice(1) : projectPyDataName;
   const prompt = `python_mcp: run ${JSON.stringify(rel)} from project root as __main__. Reply with the tool's "Process finished with exit code" line.`;
 
-  const ta = host.locator("textarea").first();
+  const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(1_000);
   await ta.click();
@@ -867,16 +899,26 @@ export const CH12_2_TEX_MCP_USER_PROMPT =
 export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Promise<void> {
   await ensureReasLingoVisible(page);
 
+  const exploreUploadDialog = page.getByRole("dialog").filter({
+    has: page.getByRole("button", { name: "Select Files", exact: true }),
+  });
+  if (await exploreUploadDialog.isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape");
+    await expect(exploreUploadDialog).toBeHidden({ timeout: 15_000 });
+  }
+
   const shell = page
     .locator('[data-sidebar="group"]')
     .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .filter({ visible: true })
     .first();
-  await expect(shell).toBeVisible({ timeout: 20_000 });
-
-  const host = shell.filter({ has: page.getByTitle("Add Context") }).first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
-  const agentBtn = host.locator('button[title="Switch Agent"]').first();
+  const agentBtn = host
+    .getByRole("button", { name: /^Agent$/i })
+    .or(host.locator('button[title="Switch Agent"]'))
+    .first();
   await expect(agentBtn).toBeVisible({ timeout: 15_000 });
 
   const agentTriggerLabel = ((await agentBtn.textContent()) ?? "").replace(/\s+/g, " ").trim();
@@ -923,7 +965,7 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
   await newChatBtn.click();
   await page.waitForTimeout(500);
 
-  const ta = host.locator("textarea").first();
+  const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
   await ta.fill(CH12_2_TEX_MCP_USER_PROMPT);
@@ -983,11 +1025,7 @@ export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
  */
 export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
-  const host = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   const chatHistoryPopover = () =>
@@ -1032,7 +1070,7 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
   });
 
   await test.step(`§7.6-3：发送「${CH7_HISTORY_RECALL_PROMPT}」并等待流式结束`, async () => {
-    const ta = host.locator("textarea").first();
+    const ta = reasLingoPromptInput(host);
     await expect(ta).toBeVisible({ timeout: 15_000 });
     await ta.click();
     await ta.fill(CH7_HISTORY_RECALL_PROMPT);
@@ -1081,11 +1119,7 @@ function reasLingoIdeSettingsInnerTablist(page: Page): Locator {
  */
 export async function reasLingoOpenIdeAiSettings(page: Page): Promise<void> {
   await ensureReasLingoVisible(page);
-  const sidebar = page
-    .locator('[data-sidebar="group"]')
-    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-    .filter({ has: page.getByTitle("Add Context") })
-    .first();
+  const sidebar = reasLingoInputHostLocator(page);
   const settingsBtn = sidebar.locator('button[title="Settings"]').first();
   await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
   await settingsBtn.click();
@@ -1217,11 +1251,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
   await test.step("§7.7-5 关闭设置；侧栏 Switch Model 列表含 test", async () => {
     await reasLingoCloseIdeAiSettingsTab(page);
 
-    const host = page
-      .locator('[data-sidebar="group"]')
-      .filter({ has: page.getByText("ReasLingo", { exact: true }) })
-      .filter({ has: page.getByTitle("Add Context") })
-      .first();
+    const host = reasLingoInputHostLocator(page);
     await expect(host).toBeVisible({ timeout: 20_000 });
 
     const modelTrigger = host.locator('button[title="Switch Model"]').first();
