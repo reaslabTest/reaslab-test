@@ -1,6 +1,6 @@
 # 站点 A（全量 scope）：**`common/run-scope-beta.txt`**。子集与 **`schedule_test.yml`** 配对；**`E2E_BASE_URL`** 在本文件 **`env`** 写死（换站请改字面量）。
-# 每 3 小时执行（UTC）：`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** + **`common/run-scope-beta.txt`** → Vercel 报告 → 飞书（**`E2E_BASE_URL`** 见本 job **`env`** / **`common/global-setup.ts`**）。
-# GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */3 * * *` = 每 3 小时整点一次（0、3、6… 时 UTC 的 :00）。
+# 每 6 小时执行（UTC）：`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** + **`common/run-scope-beta.txt`** → Vercel 报告 → 飞书（**`E2E_BASE_URL`** 见本 job **`env`** / **`common/global-setup.ts`**）。
+# GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */6 * * *` = 每 6 小时整点一次（0、6、12、18 时 UTC 的 :00；东八区约 8:00、14:00、20:00、次日 2:00）。
 # 若单次 job 偶发超过定时间隔且 `cancel-in-progress: true`，下一触发可能取消上一跑；可改为 `false` 或再调稀 cron。
 #
 # `package.json` 的 postinstall 会执行 `playwright install chromium`（体积大、易拖长 Install）。
@@ -9,11 +9,11 @@
 # pnpm：**不**启用 `setup-node` 的 `cache: pnpm`（GitHub Actions 缓存 tarball，经代理常 0 B/s 卡住）。
 # GitHub 托管 runner：每 job 干净环境，Playwright 浏览器依赖本 workflow 的 `actions/cache` 或 postinstall 下载。
 # （若改回 self-hosted：同一用户下 `pnpm store` 常持久存在，`pnpm install` 更易复用本地 store。）
-name: "beta: E2E + Vercel + Feishu (3h UTC)"
+name: "beta: E2E + Vercel + Feishu (6h UTC)"
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
 
 concurrency:
