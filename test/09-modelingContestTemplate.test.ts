@@ -79,8 +79,8 @@ test.describe("9. 模板创建竞赛建模项目", () => {
   });
 
   /**
-   * `docs/用户场景.md` §9.4：**Standalone Chat Mode** → **`[data-standalone-chat]`** 内关键 UI；**不**点 **Switch to IDE Mode**，
-   * 用例以全屏态结束（报告截图为全屏）。与 **`ReasLingoHeader.tsx`** / **`StandaloneChatView.tsx`** 对齐。
+   * `docs/用户场景.md` §9.4：顶栏 **Agent Mode** → **`/projects/:uuid/agent`**（**`IdeAgent`**）；**不**点 **Switch to IDE Mode**。
+   * 兼容旧 **Standalone Chat Mode** + **`[data-standalone-chat]`**。
    */
   test("9.4 全屏AI会话", async ({ page }) => {
     test.skip(!(await tryEnterContestTemplateModelingIde(page)), MODELING_CH9_SKIP_MSG);

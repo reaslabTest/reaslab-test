@@ -6,6 +6,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { E2E_SHARE_INVITE_EMAIL } from "../common/global-setup";
 import { clearModelingProjectUuidArtifact } from "./data/e2e-modeling-project-artifact";
 import {
+  MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG,
   MODELING_CH5_SKIP_MSG,
   ensureReasLingoVisible,
   expandIdeFileTreeRowByLabel,
@@ -171,12 +172,19 @@ async function ensureDefaultAgentForReasLingoInputToolbar(
 }
 
 /**
- * §5.9：§5.3 常把模型切到 **Auto**；reaslab-iipe `ChainOfThoughtSelector` 仅在解析模型 `supportsReasoning === true` 时渲染。
- * 先关闭 Auto（与 `ModelSelector` 内开关一致）；若仍无按钮，再依次点选启用列表中的各模型行（跳过第 0 行「Auto」）。
+ * §5.9：`ChainOfThoughtSelector` 在**有效解析模型** `supportsReasoning === true` 时渲染。
+ * **Auto 开启**时有效模型为系统默认（`resolveStorageModelForCapabilities`）；默认模型支持推理则**无需关 Auto** 即可见灯泡。
+ * 仅当当前不可见时，再关 Auto 并遍历启用列表中的各模型行（跳过第 0 行「Auto」）。
  */
-async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost: Locator): Promise<void> {
+/** @returns 已出现 **Chain of Thought** 为 **`true`**；环境无可用推理模型为 **`false`**（调用方 **`test.skip`**）。 */
+async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost: Locator): Promise<boolean> {
   const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
   const cot = () => reasLingoInputHost.getByTitle("Chain of Thought");
+
+  if ((await cot().count()) > 0) {
+    await expect(cot().first()).toBeVisible({ timeout: 20_000 });
+    return true;
+  }
 
   const openModelMenu = async () => {
     await modelBtn.click();
@@ -195,7 +203,7 @@ async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost
 
   if ((await cot().count()) > 0) {
     await expect(cot().first()).toBeVisible({ timeout: 20_000 });
-    return;
+    return true;
   }
 
   const panelCount = await openModelMenu();
@@ -205,9 +213,7 @@ async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost
   await expect(panelCount).toBeHidden({ timeout: 5_000 });
 
   if (n <= 1) {
-    throw new Error(
-      "§5.9：模型菜单除 Auto 外无其它启用模型，无法展示 Chain of Thought（请在环境启用至少一枚 supportsReasoning 的模型）。",
-    );
+    return false;
   }
 
   for (let idx = 1; idx < n; idx++) {
@@ -217,13 +223,11 @@ async function ensureChainOfThoughtControlVisible(page: Page, reasLingoInputHost
     await expect(panel).toBeHidden({ timeout: 5_000 });
     if ((await cot().count()) > 0) {
       await expect(cot().first()).toBeVisible({ timeout: 20_000 });
-      return;
+      return true;
     }
   }
 
-  throw new Error(
-    "§5.9：已关闭 Auto 并遍历启用模型，仍无 Chain of Thought（当前列表可能均无 supportsReasoning）。",
-  );
+  return false;
 }
 
 /** §5.3 / §5.4 / §5.10：关闭模型菜单中的 Auto（§5.3 常开启）。 */
@@ -461,7 +465,8 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
 
     const { reasLingoInputHost } = reasLingoHosts(page);
     await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
-    await ensureChainOfThoughtControlVisible(page, reasLingoInputHost);
+    const cotReady = await ensureChainOfThoughtControlVisible(page, reasLingoInputHost);
+    test.skip(!cotReady, MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG);
 
     const cotBtn = reasLingoInputHost.getByTitle("Chain of Thought");
     await expect(cotBtn.first()).toBeVisible({ timeout: 5_000 });
@@ -528,37 +533,64 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
       .first();
     await expect(morePanel).toBeVisible({ timeout: 10_000 });
 
-    const settingRows = morePanel.locator("div.space-y-3 > div.space-y-2");
-    await expect(settingRows).toHaveCount(3);
+    /**
+     * `reaslab-iipe` `ChatCommonSettingsSelector`：`maxOutputTokens` 随 `useModelData` 就绪会从默认 8192 变为模型上限，
+     * 触发 `useEffect` 将三项重置为 `DEFAULT_CHAT_COMMON_SETTINGS`（均为 enabled: false）。须先等 **Max: …** 文案出现并略作稳定。
+     */
+    await expect(morePanel.getByText(/Max:\s*[\d,]+/)).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(800);
 
-    const tempBlock = settingRows.nth(0);
-    const maxTokensBlock = settingRows.nth(1);
-    const topPBlock = settingRows.nth(2);
-    await expect(tempBlock.getByText("Temperature", { exact: true })).toBeVisible();
-    await expect(maxTokensBlock.getByText("Max output tokens", { exact: true })).toBeVisible();
-    await expect(topPBlock.getByText("Top P", { exact: true })).toBeVisible();
+    const settingRow = (label: string) =>
+      morePanel.locator("div.space-y-2").filter({ has: page.getByText(label, { exact: true }) });
 
-    for (const block of [tempBlock, maxTokensBlock, topPBlock]) {
+    const tempBlock = settingRow("Temperature");
+    const maxTokensBlock = settingRow("Max output tokens");
+    const topPBlock = settingRow("Top P");
+    await expect(tempBlock).toHaveCount(1);
+    await expect(maxTokensBlock).toHaveCount(1);
+    await expect(topPBlock).toHaveCount(1);
+
+    /** 开关打开后才挂载控件；以 **slider / spinbutton / data-slot=input** 可见为准（勿单靠 `toBeChecked`，Base UI Switch 与 React 状态可能不同步）。 */
+    const ensureSettingSwitchOn = async (block: Locator, control: "slider" | "number") => {
       const sw = block.getByRole("switch");
-      if (!(await sw.isChecked())) {
-        await sw.click();
-      }
-      await expect(sw).toBeChecked();
-    }
+      const controlLocator =
+        control === "slider"
+          ? block.getByRole("slider")
+          : block.getByRole("spinbutton").or(block.locator('[data-slot="input"]')).first();
+      await expect(sw).toBeVisible({ timeout: 5_000 });
+      await expect
+        .poll(
+          async () => {
+            if (await controlLocator.isVisible().catch(() => false)) {
+              return true;
+            }
+            await sw.click();
+            await page.waitForTimeout(400);
+            return controlLocator.isVisible().catch(() => false);
+          },
+          { timeout: 20_000, intervals: [200, 400, 800, 1_600] },
+        )
+        .toBeTruthy();
+    };
 
-    await expect(tempBlock.locator('input[type="range"]')).toBeVisible({ timeout: 5_000 });
-    // Switch 内含 `input[type="checkbox"]`（aria-hidden），勿用 `input` 的 first。
-    const maxInput = maxTokensBlock.locator('input[type="number"]');
-    await expect(maxInput).toBeVisible({ timeout: 5_000 });
-    await expect(topPBlock.locator('input[type="range"]')).toBeVisible({ timeout: 5_000 });
+    await ensureSettingSwitchOn(tempBlock, "slider");
+    await ensureSettingSwitchOn(maxTokensBlock, "number");
+    await ensureSettingSwitchOn(topPBlock, "slider");
 
-    await tempBlock.locator('input[type="range"]').fill("0.7");
+    const tempSlider = tempBlock.getByRole("slider");
+    const maxInput = maxTokensBlock
+      .getByRole("spinbutton")
+      .or(maxTokensBlock.locator('[data-slot="input"]'))
+      .first();
+    const topPSlider = topPBlock.getByRole("slider");
+
+    await tempSlider.fill("0.7");
     await expect(tempBlock.getByText("0.70", { exact: true })).toBeVisible({ timeout: 5_000 });
 
     await maxInput.fill("1024");
     await expect(maxInput).toHaveValue("1024");
 
-    await topPBlock.locator('input[type="range"]').fill("1");
+    await topPSlider.fill("1");
     await expect(topPBlock.getByText("1.00", { exact: true })).toBeVisible({ timeout: 5_000 });
 
     // 配置为 `screenshot: "on"` 时，用例结束截图在 `Escape` 之后，只能得到收起后的工具条（图1）。

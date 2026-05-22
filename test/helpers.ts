@@ -317,6 +317,15 @@ export async function ensureReasLingoVisible(page: Page): Promise<void> {
   await expect(header).toBeVisible({ timeout: 20_000 });
 }
 
+/** 侧栏整块 **ReasLingo**（含 **`ReasLingoHeader`** 的 New Chat 与 **`MessageList`**，不仅输入条）。 */
+export function reasLingoSidebarShellLocator(page: Page): Locator {
+  return page
+    .locator('[data-sidebar="group"]')
+    .filter({ has: page.getByText("ReasLingo", { exact: true }) })
+    .filter({ visible: true })
+    .first();
+}
+
 /**
  * reaslab-iipe 侧栏 ReasLingo 输入区（`MessageInput`）。
  * 旧版 **Add Context** 已改为 **`@` 提及**（`AtMentionPopover.tsx`）+ **`title="Upload Files for AI Chat"`**。
@@ -341,14 +350,14 @@ export function reasLingoPromptInput(reasLingoInputHost: Locator): Locator {
 }
 
 /**
- * 侧栏 **ReasLingo** → **`title="New Chat"`**（`ReasLingoHeader.tsx` / `ReasLingoChatArea.tsx` 的 `createSession`）。
- * 用于 §7.3 结束后为 §7.5 另开一条会话，使 §7.6 Chat History 至少两条。
+ * 侧栏 **ReasLingo** → **`title="New Chat"`**（`ReasLingoHeader.tsx`）。
+ * **`reaslab-iipe`**：`onNewSession` 为 **`handleCreateEmptySession`**（`setAiCurrentSession(null)` + **WelcomeScreen**），**不**立即 `createSession`；首条发送时由 **`ReasLingoChatArea.handleNewSession`** 创建 ACP 会话。
  */
 export async function reasLingoClickNewChatWhenIdle(page: Page): Promise<void> {
   await ensureReasLingoVisible(page);
-  const host = reasLingoInputHostLocator(page);
-  await expect(host).toBeVisible({ timeout: 20_000 });
-  const newChatBtn = host.getByTitle("New Chat").first();
+  const shell = reasLingoSidebarShellLocator(page);
+  await expect(shell).toBeVisible({ timeout: 20_000 });
+  const newChatBtn = shell.getByTitle("New Chat").first();
   await expect(newChatBtn).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(async () => (await newChatBtn.isDisabled().catch(() => true)) === false, {
@@ -357,7 +366,47 @@ export async function reasLingoClickNewChatWhenIdle(page: Page): Promise<void> {
     })
     .toBeTruthy();
   await newChatBtn.click();
-  await page.waitForTimeout(500);
+  await expect(shell.getByText(/Welcome to/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect(shell.getByText(/^who are you\?$/i)).toHaveCount(0);
+}
+
+/**
+ * 侧栏 **ReasLingo** 切回 **Default** Agent（**§7.5** / **§8.5** 等；**Optimization Agent** 触发器非 **`/^Agent$/`**）。
+ */
+export async function ensureReasLingoDefaultAgent(page: Page, host?: Locator): Promise<void> {
+  const h = host ?? reasLingoInputHostLocator(page);
+  const agentBtn = h
+    .getByRole("button", { name: /^Agent$/i })
+    .or(h.locator('button[title="Switch Agent"]'))
+    .first();
+  await expect(agentBtn).toBeVisible({ timeout: 15_000 });
+  const label = ((await agentBtn.textContent()) ?? "").replace(/\s+/g, " ").trim();
+  if (label === "Agent") {
+    return;
+  }
+  await agentBtn.click();
+  const panel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const defaultItem = panel.locator('[data-slot="dropdown-menu-item"]').filter({ hasText: /^Default$/i });
+  if ((await defaultItem.count()) > 0) {
+    await defaultItem.first().click();
+  } else {
+    const selectedRow = panel
+      .locator('[data-slot="dropdown-menu-item"]')
+      .filter({ has: page.locator("svg.lucide-check") });
+    if ((await selectedRow.count()) > 0) {
+      await selectedRow.first().click();
+    } else {
+      await page.keyboard.press("Escape");
+      throw new Error("ReasLingo 无法切回 Default Agent。");
+    }
+  }
+  try {
+    await expect(panel).toBeHidden({ timeout: 5_000 });
+  } catch {
+    await page.keyboard.press("Escape");
+  }
+  await expect(agentBtn.getByText(/^Agent$/)).toBeVisible({ timeout: 15_000 });
 }
 
 /** 在 ReasLingo 输入框用 `@` 选中工程内已有文件（与 `useAtMention` / `AtMentionPopover` 一致）。 */
@@ -547,23 +596,58 @@ export async function expandIdeFileTreeRowByLabel(page: Page, rowLabel: string |
 }
 
 /**
+ * 侧栏 ReasLingo 本轮「进行中」线索（与 **`MessageInput`** 的 **Stop Message**、**`MessageList`** 的
+ * **Receiving response** / **Thinking** / **Processing, please wait** 一致）。
+ */
+export function reasLingoStreamActivityLocator(host: Locator): Locator {
+  return host
+    .getByTitle("Stop Message")
+    .or(host.getByText(/Receiving response/i))
+    .or(host.getByText(/^Thinking$/i))
+    .or(host.getByText(/Processing, please wait/i));
+}
+
+/** 发送后等待流式/工具阶段开始（须在点击 **Send Message** 之后立刻调用，避免竞态）。 */
+export async function waitForReasLingoStreamStarted(page: Page, timeout = 180_000): Promise<void> {
+  const host = reasLingoInputHostLocator(page);
+  await expect(reasLingoStreamActivityLocator(host).first()).toBeVisible({ timeout });
+}
+
+/**
  * 等待 ReasLingo 本轮助理回复**流式结束**（与前端 `MessageInput` 的 `isLoading` → **Stop Message**、
  * `MessageList` 的 **Receiving response** 一致）。勿用固定 `sleep`：Paper Copilot / 工具链可能远超 30s，
  * 否则后续断言会在仍在生成时开始，导致超时误报。
+ *
+ * 若调用时流式已结束（**Send Message** 可见且无 **Stop**），则不再要求「进行中」UI 再次出现。
  */
 export async function waitForReasLingoAssistantReplyDone(page: Page): Promise<void> {
   const host = reasLingoInputHostLocator(page);
 
   const stopBtn = host.getByTitle("Stop Message");
   const receiving = host.getByText(/Receiving response/i);
-  const streamUi = stopBtn.or(receiving).first();
+  const streamUi = reasLingoStreamActivityLocator(host).first();
 
-  await expect(streamUi).toBeVisible({ timeout: 120_000 });
+  const isIdle = async (): Promise<boolean> => {
+    const r = await receiving.isVisible().catch(() => false);
+    const s = await stopBtn.isVisible().catch(() => false);
+    if (r || s) {
+      return false;
+    }
+    return host.getByTitle("Send Message").first().isVisible().catch(() => false);
+  };
+
+  if (!(await streamUi.isVisible().catch(() => false))) {
+    if (await isIdle()) {
+      return;
+    }
+    await expect(streamUi).toBeVisible({ timeout: 120_000 });
+  }
+
   await expect
     .poll(
       async () => {
-        const r = await host.getByText(/Receiving response/i).isVisible().catch(() => false);
-        const s = await host.getByTitle("Stop Message").isVisible().catch(() => false);
+        const r = await receiving.isVisible().catch(() => false);
+        const s = await stopBtn.isVisible().catch(() => false);
         return !r && !s;
       },
       { timeout: 300_000, intervals: [400, 800, 1_600, 3_200] },
@@ -609,41 +693,79 @@ export async function reasLingoWhoAreYouProbe(
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
-  const streamStarted = host
-    .getByTitle("Stop Message")
-    .or(host.getByText(/Receiving response/i));
-  await expect(streamStarted.first()).toBeVisible({ timeout: 180_000 });
+  await waitForReasLingoStreamStarted(page);
   await waitForReasLingoAssistantReplyDone(page);
   return true;
 }
 
 /**
- * **`docs/用户场景.md` §9.4**：侧栏 **ReasLingo** 标题栏 **`title="Standalone Chat Mode"`**（**`ReasLingoHeader.tsx`**）→
- * 断言 **`[data-standalone-chat]`**（**`StandaloneChatView`** Portal）内 **History**、**Search conversations…**、ReasLingo 输入区；
- * 桌面默认右侧 **Activity** 面板；并断言 **`title="Switch to IDE Mode"`** 可见（**不点击**），以便用例结束时页面仍处全屏、报告截图为全屏态。
+ * **`docs/用户场景.md` §9.4**：全屏 AI 会话。
  *
- * @returns 未找到全屏入口或全屏层未挂载时返回 **`false`**（调用方 **`test.skip`**）。
+ * **当前 `reaslab-iipe`**：顶栏 **`Switch to Agent Mode`**（`menubar.tsx` **`ToggleAgentModeButton`**）→ 路由 **`/projects/:uuid/agent`**（**`IdeAgent`**）；
+ * 含 **Search conversations…**、**MessageInput**、右侧 **Activity** Tab、**Switch to IDE Mode**（**`IdeAgentHeader`**）。
+ *
+ * **旧版（已移除）**：侧栏 **`title="Standalone Chat Mode"`** + Portal **`[data-standalone-chat]`**（**`StandaloneChatView`**）；若环境仍保留则走兼容分支。
+ *
+ * @returns 无入口或全屏页关键控件未就绪时 **`false`**（**`test.skip`**）。
  */
 export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promise<boolean> {
-  await ensureReasLingoVisible(page);
-  const enter = page.getByTitle("Standalone Chat Mode").first();
-  if ((await enter.count()) < 1 || !(await enter.isVisible().catch(() => false))) {
+  const projectMatch = page.url().match(/\/projects\/([^/]+)/);
+  if (!projectMatch) {
     return false;
   }
-  await enter.click();
-  const shell = page.locator("[data-standalone-chat]").first();
+
+  const legacyEnter = page.getByTitle("Standalone Chat Mode").first();
+  if ((await legacyEnter.count()) > 0 && (await legacyEnter.isVisible().catch(() => false))) {
+    await legacyEnter.click();
+    const shell = page.locator("[data-standalone-chat]").first();
+    try {
+      await expect(shell).toBeVisible({ timeout: 25_000 });
+      await expect(shell.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 15_000 });
+      await expect(
+        shell.getByTitle("Upload Files for AI Chat").or(shell.locator("textarea")).first(),
+      ).toBeVisible({ timeout: 15_000 });
+      await expect(shell.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+      await expect(shell.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  await ensureReasLingoVisible(page).catch(() => {});
+
+  const agentModeBtn = page
+    .locator("button")
+    .filter({ has: page.locator('img[alt="Agent Mode"]') })
+    .first();
+  if ((await agentModeBtn.count()) < 1 || !(await agentModeBtn.isVisible().catch(() => false))) {
+    return false;
+  }
+
+  await agentModeBtn.click();
+
+  const projectUuid = projectMatch[1];
   try {
-    await expect(shell).toBeVisible({ timeout: 25_000 });
+    await expect(page).toHaveURL(new RegExp(`/projects/${projectUuid}/agent/?$`, "i"), {
+      timeout: 30_000,
+    });
   } catch {
     return false;
   }
-  await expect(shell.getByText("History", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(shell.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 15_000 });
-  await expect(
-    shell.getByTitle("Upload Files for AI Chat").or(shell.locator("textarea")).first(),
-  ).toBeVisible({ timeout: 15_000 });
-  await expect(shell.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(shell.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
+
+  try {
+    await expect(page.getByPlaceholder("Search conversations...").first()).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(
+      page.getByTitle("Upload Files for AI Chat").or(page.getByRole("textbox")).first(),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
+  } catch {
+    return false;
+  }
+
   return true;
 }
 
@@ -732,19 +854,7 @@ export async function reasLingoDefaultAgentLeanGettingStartedProbe(page: Page): 
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
-
-  const relEsc = MIL_S01_GETTING_STARTED_LEAN_REL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  try {
-    await expect(async () => {
-      await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      const body = (await host.innerText()) ?? "";
-      expect(/read_file|S01_Getting_Started\.lean/i.test(body)).toBeTruthy();
-      expect(new RegExp(relEsc, "i").test(body)).toBeTruthy();
-    }).toPass({ timeout: 60_000 });
-  } catch {
-    return false;
-  }
-
+  await waitForReasLingoStreamStarted(page);
   await waitForReasLingoAssistantReplyDone(page);
 
   const readHardFailure =
@@ -862,17 +972,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
-
-  try {
-    await expect(async () => {
-      await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      const body = (await host.innerText()) ?? "";
-      expect(/lake\s+build|lake_build|lake_mcp/i.test(body)).toBeTruthy();
-    }).toPass({ timeout: 60_000 });
-  } catch {
-    return false;
-  }
-
+  await waitForReasLingoStreamStarted(page);
   await waitForReasLingoAssistantReplyDone(page);
 
   const lakeBuildHardFailure =
@@ -925,9 +1025,35 @@ export function reasLingoPythonExecuteSuccessInSidebarText(text: string, relPyPa
   const toolPathOk =
     /python-execute/i.test(t) &&
     mentionsScript &&
-    (/Execute Tool Call/i.test(t) || /"exit_code"\s*:\s*0\b/.test(t) || /\bexit[_\s-]*code\s*[:=]\s*0\b/i.test(t));
+    (/Execute Tool Call/i.test(t) ||
+      /"exit_code"\s*:\s*0\b/.test(t) ||
+      /\bexit[_\s-]*code\s*[:=]\s*0\b/i.test(t));
 
-  return exitOk || toolPathOk;
+  const actionsToolOk =
+    /\bActions\s+[1-9]\d*\/[1-9]\d*\b/i.test(t) &&
+    mentionsScript &&
+    (/python-execute|bash|shell/i.test(t));
+
+  return exitOk || toolPathOk || actionsToolOk;
+}
+
+/** §7.5：侧栏是否出现**助理侧**工具执行线索（勿仅匹配用户气泡里的 `python-execute` 字样）。 */
+export function reasLingoPythonExecuteToolStartedInSidebarText(text: string, relPyPath: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  const base = relPyPath.replace(/^\/+/, "").split("/").pop() ?? relPyPath;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const mentionsScript =
+    new RegExp(esc(relPyPath), "i").test(t) || new RegExp(esc(base), "i").test(t);
+  if (!mentionsScript || !/python-execute/i.test(t)) {
+    return false;
+  }
+  return (
+    /\bActions\s+[1-9]\d*\/[1-9]\d*\b/i.test(t) ||
+    /Execute Tool Call/i.test(t) ||
+    /Process finished with exit code\s*0\b/i.test(t) ||
+    /"exit_code"\s*:\s*0\b/.test(t) ||
+    /\bexit[_\s-]*code\s*[:=]\s*0\b/i.test(t)
+  );
 }
 
 /**
@@ -940,53 +1066,96 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
   projectPyDataName: string,
 ): Promise<void> {
   await ensureReasLingoVisible(page);
+  const shell = reasLingoSidebarShellLocator(page);
   const host = reasLingoInputHostLocator(page);
+  await expect(shell).toBeVisible({ timeout: 20_000 });
   await expect(host).toBeVisible({ timeout: 20_000 });
 
+  await ensureReasLingoDefaultAgent(page, host);
   await reasLingoClickNewChatWhenIdle(page);
 
   const rel = projectPyDataName.startsWith("/") ? projectPyDataName.slice(1) : projectPyDataName;
+  const base = rel.split("/").pop() ?? rel;
   const prompt = [
-    `From the project root, run ${JSON.stringify(rel)} as __main__ using python-execute only`,
-    `(for example: python-execute ${JSON.stringify(rel)}).`,
-    "After it finishes, reply with one line copied from the tool output that shows success",
-    '(e.g. "exit_code": 0 or exit code 0).',
+    `Run ${JSON.stringify(rel)} from the project root with the bash/shell tool.`,
+    `The command MUST be exactly: python-execute ${JSON.stringify(rel)}`,
+    "Wait until execution finishes. Do not answer without running that command.",
+    'Reply with one line from tool output showing success (e.g. "exit_code": 0 or exit code 0).',
   ].join(" ");
 
   const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
-  await page.waitForTimeout(1_000);
+  await expect
+    .poll(
+      async () => {
+        const stop = await host.getByTitle("Stop Message").isVisible().catch(() => false);
+        const recv = await host.getByText(/Receiving response/i).isVisible().catch(() => false);
+        return !stop && !recv;
+      },
+      { timeout: 120_000, intervals: [400, 800, 1_600] },
+    )
+    .toBeTruthy();
+
   await ta.click();
   await ta.fill(prompt);
+  await expect(ta).toHaveValue(new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), {
+    timeout: 10_000,
+  });
+
   const sendBtn = host.getByTitle("Send Message").first();
-  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await expect(sendBtn).toBeEnabled({ timeout: 60_000 });
   await sendBtn.click();
 
   const relEsc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const baseEsc = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  /** 用户气泡在 **`MessageList`**，不在仅含输入条的 `host` 内；发送失败时 `handleSendMessage` 会静默 return 且仍显示 Welcome。 */
+  try {
+    await expect(shell.getByText(new RegExp(relEsc, "i")).first()).toBeVisible({ timeout: 45_000 });
+  } catch {
+    const toast = page.locator("[data-sonner-toast]").filter({
+      hasText: /Authentication required|Failed to start conversation|Failed to send message/i,
+    });
+    if (await toast.first().isVisible().catch(() => false)) {
+      throw new Error(
+        `§7.5：ReasLingo 未发出用户消息（${base}）。侧栏 toast：${((await toast.first().innerText()) ?? "").slice(0, 300)}`,
+      );
+    }
+    const stillWelcome = await shell.getByText(/Welcome to/i).isVisible().catch(() => false);
+    throw new Error(
+      stillWelcome
+        ? `§7.5：点击发送后仍为 WelcomeScreen，用户消息未进入 MessageList（可能 isLoading 仍为 true 或 ACP session 未创建）。探针：${base}`
+        : `§7.5：侧栏未出现含 ${base} 的用户消息。`,
+    );
+  }
+
+  await expect(reasLingoStreamActivityLocator(shell).first()).toBeVisible({ timeout: 180_000 });
+
   await expect(async () => {
     await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    const body = (await host.innerText()) ?? "";
-    expect(/python-execute/i.test(body)).toBeTruthy();
-    expect(new RegExp(relEsc, "i").test(body)).toBeTruthy();
-  }).toPass({ timeout: 60_000 });
+    const body = (await shell.innerText()) ?? "";
+    expect(reasLingoPythonExecuteToolStartedInSidebarText(body, rel)).toBeTruthy();
+  }).toPass({ timeout: 300_000 });
 
   await waitForReasLingoAssistantReplyDone(page);
 
   const pythonHardFailure =
     /Command timed out after|failed to execute command|python-execute:\s|Unauthorized access|GurobiError/i;
 
-  await expect
-    .poll(
-      async () => {
-        const body = (await host.innerText()) ?? "";
-        if (pythonHardFailure.test(body)) {
-          throw new Error(`§7.5 python-execute 失败（侧栏含执行错误）。节选：${body.slice(-2_500)}`);
-        }
-        return reasLingoPythonExecuteSuccessInSidebarText(body, rel);
-      },
-      { timeout: 300_000, intervals: [800, 2_000, 4_000, 8_000] },
-    )
-    .toBeTruthy();
+  const bodyFinal = (await shell.innerText()) ?? "";
+  if (pythonHardFailure.test(bodyFinal)) {
+    throw new Error(`§7.5 python-execute 失败（侧栏含执行错误）。节选：${bodyFinal.slice(-2_500)}`);
+  }
+  if (!reasLingoPythonExecuteSuccessInSidebarText(bodyFinal, rel)) {
+    const stillOn73 =
+      /who are you\?/i.test(bodyFinal) &&
+      !new RegExp(`python-execute.*${baseEsc}`, "is").test(bodyFinal.replace(/\s+/g, " "));
+    throw new Error(
+      stillOn73
+        ? "§7.5：侧栏仍为 §7.3「who are you?」会话，python-execute 探针未发出或未渲染；请确认 New Chat 与 Default Agent。"
+        : `§7.5：助理未执行 python-execute ${rel} 或未出现 exit_code 0 / Actions 线索。节选：${bodyFinal.slice(-2_500)}`,
+    );
+  }
 }
 
 /** `docs/用户场景.md` §12.2：发给模型的用户消息须为英文（**`latexmk`**，与 **`reaslab-iipe` `skills.rs`** 一致）。 */
@@ -1083,14 +1252,7 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
-
-  await expect(async () => {
-    await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    const body = (await shell.innerText()) ?? "";
-    expect(/test_upload\.tex/i.test(body)).toBeTruthy();
-    expect(/latexmk|compile_tex/i.test(body)).toBeTruthy();
-  }).toPass({ timeout: 60_000 });
-
+  await waitForReasLingoStreamStarted(page);
   await waitForReasLingoAssistantReplyDone(page);
 
   const latexHardFailure =
@@ -1388,6 +1550,10 @@ export const MIL_GETTING_STARTED_SEGMENTS = ["MIL", "C01_Introduction", "S01_Get
 export const MODELING_CH5_SKIP_MSG =
   "无法进入数学建模 IDE：请确认已登录且 New Project 可创建 Modeling 项目，或 test/data/.e2e-artifacts/modeling-project-uuid.txt 仍有效。";
 
+/** `docs/用户场景.md` §5.9：**Chain of Thought** 依赖系统默认或至少一枚启用模型的 **`supportsReasoning`**（Auto 下默认可推理时亦可见）。 */
+export const MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG =
+  "§5.9 Chain of Thought：系统默认与已启用模型均不支持 reasoning（Auto 与手动切换后仍无 CoT 按钮），跳过。";
+
 /** `docs/用户场景.md` §7「模板创建优化建模项目」：从「Optimization Modeling Templates」创建项目失败时的跳过说明。 */
 export const MODELING_CH7_SKIP_MSG =
   "无法从优化建模模板进入数学建模 IDE：请确认已登录、模板服务可用，或 test/data/.e2e-artifacts/optimization-template-project-uuid.txt 仍有效。";
@@ -1400,9 +1566,9 @@ export const MODELING_PYTHON_CONSOLE_GUROBI_SKIP_MSG =
 export const MODELING_CH9_SKIP_MSG =
   "无法从数学建模竞赛模板进入建模 IDE：请确认已登录、竞赛模板服务可用，或 test/data/.e2e-artifacts/modeling-contest-template-project-uuid.txt 仍有效。";
 
-/** `docs/用户场景.md` §9.4：未出现 **Standalone Chat Mode** 入口或 **`[data-standalone-chat]`** 全屏层未挂载时的 **`test.skip`** 说明（窄屏/移动布局可能隐藏入口）。 */
+/** `docs/用户场景.md` §9.4：未进入 **Agent Mode**（`/projects/:uuid/agent`）或 **IdeAgent** 关键控件未就绪时的 **`test.skip`** 说明。 */
 export const MODELING_CH9_STANDALONE_CHAT_SKIP_MSG =
-  "§9.4 全屏 AI 会话：侧栏未找到 **Standalone Chat Mode** 或全屏层未挂载；若为移动视口请用桌面宽度重跑。";
+  "§9.4 全屏 AI 会话：顶栏未找到 **Agent Mode** 入口、或未进入 `/projects/:uuid/agent`（IdeAgent）；窄屏下侧栏可能折叠，请用桌面宽度（≥1280）重跑。";
 
 /** `docs/用户场景.md` §8「模板创建定理证明项目」：MIL 定理证明模板 IDE 不可用时的跳过说明（与 `tryEnterLeanProjectIde` / `theorem-project-uuid.txt` 一致）。 */
 export const THEOREM_CH8_SKIP_MSG =
