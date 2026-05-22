@@ -5,7 +5,7 @@ import { absUrl } from "../common/global-setup";
 /**
  * **用户场景 §11**：页脚导航链接可正常跳转（见 `docs/用户场景.md`）。
  * 覆盖：`reaslab-iipe` `app/home/footer.tsx` 中 **Products** / **Templates** / **Resources** / **About**；
- * 外链与模板列为 **`target="_blank"`**（popup）；**Products** 为站内 **`Link`**（同页跳转）。
+ * **Products**、**Templates**、**Playground** 为 React Router **`Link`**（同页跳转）；**User Guide** / **Blog** / **Publications** / **ReasLab** 为 **`target="_blank"`**（popup）。
  *
  * 单文件调试：`pnpm run test:11:headed`
  */
@@ -100,19 +100,35 @@ test.describe("11. 页脚导航链接", () => {
     });
 
     await test.step("Templates · Optimization Modeling → /modeling-templates", async () => {
-      await assertFooterLinkOpensPopup(page, "Optimization Modeling", pathnameMatches(/^\/modeling-templates\/?$/i));
+      await assertFooterLinkNavigatesSameTab(
+        page,
+        "Optimization Modeling",
+        pathnameMatches(/^\/modeling-templates\/?$/i),
+      );
+      await gotoMarketingHome(page);
     });
 
     await test.step("Templates · Theorem Proving → /theorem-proving-templates", async () => {
-      await assertFooterLinkOpensPopup(page, "Theorem Proving", pathnameMatches(/^\/theorem-proving-templates\/?$/i));
+      await assertFooterLinkNavigatesSameTab(
+        page,
+        "Theorem Proving",
+        pathnameMatches(/^\/theorem-proving-templates\/?$/i),
+      );
+      await gotoMarketingHome(page);
     });
 
     await test.step("Templates · Math Modeling Contests → /modeling-competition", async () => {
-      await assertFooterLinkOpensPopup(page, "Math Modeling Contests", pathnameMatches(/^\/modeling-competition\/?$/i));
+      await assertFooterLinkNavigatesSameTab(
+        page,
+        "Math Modeling Contests",
+        pathnameMatches(/^\/modeling-competition\/?$/i),
+      );
+      await gotoMarketingHome(page);
     });
 
     await test.step("Resources · Playground → /playground", async () => {
-      await assertFooterLinkOpensPopup(page, "Playground", pathnameMatches(/^\/playground\/?$/i));
+      await assertFooterLinkNavigatesSameTab(page, "Playground", pathnameMatches(/^\/playground\/?$/i));
+      await gotoMarketingHome(page);
     });
 
     await test.step("Resources · User Guide → docs.reaslab.io", async () => {
