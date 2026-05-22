@@ -18,8 +18,8 @@ export const E2E_BASE_URL =
  * 勿提交含签名的变体；机器人须关闭签名校验（与飞书脚本一致）。
  * 须为**单独一行**源码赋值（`send-feishu.mjs` 按行解析）；勿在注释反引号内写与真实赋值同形的占位 URL，以免旧版正则误匹配。
  */
-const FEISHU_WEBHOOK_URL_DEFAULT = "https://open.feish/u.cn/open-apis/bot/v2/hook/cd861436-2cdb-4f1e-8921-86f5d768d068";
-// const FEISHU_WEBHOOK_URL_DEFAULT = "https://open.feishu.cn/open-apis/bot/v2/hook/9400670c-7cc1-4840-b535-b597844c80d7";
+// const FEISHU_WEBHOOK_URL_DEFAULT = "https://open.feish/u.cn/open-apis/bot/v2/hook/cd861436-2cdb-4f1e-8921-86f5d768d068";
+const FEISHU_WEBHOOK_URL_DEFAULT = "https://open.feishu.cn/open-apis/bot/v2/hook/9400670c-7cc1-4840-b535-b597844c80d7";
 
 export const FEISHU_WEBHOOK_URL =
   process.env.FEISHU_WEBHOOK_URL?.trim() || FEISHU_WEBHOOK_URL_DEFAULT;
