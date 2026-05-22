@@ -12,7 +12,7 @@ import {
   milSemanticSearchAndLeanToolbarProbe,
   openLeafFile,
   reasLingoDefaultAgentLakeMcpBuildProbe,
-  reasLingoDefaultAgentLeanMcpInfoviewProbe,
+  reasLingoDefaultAgentLeanGettingStartedProbe,
   reasLingoWhoAreYouProbe,
   tryEnterLeanProjectIde,
 } from "./helpers";
@@ -103,23 +103,23 @@ test.describe("8. 模板创建定理证明项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §8.5（调用lean_mcp）：在 **§8.2** 同款 **`S01_Getting_Started.lean`** 已打开的前提下，将 Agent 切回 **Default**，
-   * 探针写明 **`MIL/C01_Introduction/...`** 与首行 **`#eval "Hello, World!"`**（与模板一致，**非** **`IO.println`**），经 **`lean_mcp`** 查 **Infoview / goals**。
+   * **`docs/用户场景.md`** §8.5：在 **§8.2** 同款 **`S01_Getting_Started.lean`** 已打开的前提下，**Default** + **New Chat**，
+   * 经 **`read_file`** 读取并确认首行 **`#eval "Hello, World!"`**（**§8.2** 已在 IDE **Infoview** 验收预览）。
    */
-  test("8.5 调用lean_mcp", async ({ page }) => {
+  test("8.5 读取 Getting Started Lean", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     await openMilGettingStartedLean(page);
     await page.locator(".cm-editor").first().waitFor({ state: "visible", timeout: 120_000 });
 
-    const ok = await reasLingoDefaultAgentLeanMcpInfoviewProbe(page);
+    const ok = await reasLingoDefaultAgentLeanGettingStartedProbe(page);
     test.skip(!ok, THEOREM_CH8_LEAN_MCP_SKIP_MSG);
   });
 
   /**
-   * **`docs/用户场景.md`** §8.6（调用lake_mcp）：**Default** + **`lake_mcp:`** 触发 **`lake_build`**，助理侧须含 **`status=Success`** 等摘要（与 **`lsp-proxy-lean`** **`lake_build_tool`** 返回一致）。
+   * **`docs/用户场景.md`** §8.6：**Default** + **`lake build`**（shell；兼容 **`status=Success`** 旧 MCP 摘要）。
    */
-  test("8.6 调用lake_mcp", async ({ page }) => {
+  test("8.6 调用lake build", async ({ page }) => {
     test.skip(!(await tryEnterLeanProjectIde(page)), THEOREM_CH8_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 

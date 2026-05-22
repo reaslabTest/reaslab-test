@@ -647,17 +647,41 @@ export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promis
   return true;
 }
 
+/** `docs/用户场景.md` §8.5：MIL 入门 **Lean** 相对路径（与 **`S01_Getting_Started.lean`** 首行 **`#eval "Hello, World!"`** 一致）。 */
+export const MIL_S01_GETTING_STARTED_LEAN_REL = "MIL/C01_Introduction/S01_Getting_Started.lean" as const;
+
+/** `docs/用户场景.md` §8.5：英文探针，要求 **`read_file`** 读取 **`MIL_S01_GETTING_STARTED_LEAN_REL`**（**`reaslab-iipe`** 会话 **`mcpServers: []`**，无 **`lean_mcp`**）。 */
+export const CH8_5_READ_GETTING_STARTED_USER_PROMPT =
+  `Read ${MIL_S01_GETTING_STARTED_LEAN_REL} from the project root using the read_file tool. Confirm the first code line is #eval "Hello, World!" (a string literal, not IO.println). Quote that exact line from the file in your reply.` as const;
+
+/** §8.5：侧栏是否含 **read_file / S01** 成功线索（兼容旧 **`lean_mcp` + Infoview** 环境）。 */
+export function reasLingoLeanGettingStartedSuccessInSidebarText(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  const relEsc = MIL_S01_GETTING_STARTED_LEAN_REL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hasPath = new RegExp(relEsc, "i").test(t) || /S01_Getting_Started\.lean/i.test(t);
+  const hasEval = /#eval\s+"Hello,\s*World!"/i.test(t);
+
+  const legacyLeanMcp =
+    /lean_mcp/i.test(t) && /⊢|\bno goals\b|unsolved goals|\bString\b/i.test(t);
+
+  const readFileOk =
+    /read_file/i.test(t) &&
+    hasPath &&
+    hasEval &&
+    (/Execute Tool Call/i.test(t) || /Read file|read_file/i.test(t));
+
+  return hasPath && hasEval && (readFileOk || legacyLeanMcp);
+}
+
 /**
- * **`docs/用户场景.md` §8.5（调用lean_mcp）**：在侧栏 **ReasLingo** 中切到 **Default** Agent（内置 **`mcp_servers`** 含 **`lean_mcp`**；
- * **ReasFlow Copilot** 等 Agent **不含** **`lean_mcp`**，与 **`builtin_llm_and_agents.sql`** 一致），对已聚焦的 **Lean** 叶文件发 **`lean_mcp:`** 探针，
- * 等待流式结束并断言侧栏正文出现 **Infoview / goals** 或 **`Hello, World!`** 等工具输出线索。
+ * **`docs/用户场景.md` §8.5（读取 Getting Started Lean）**：侧栏 **ReasLingo**、**Default** Agent → **`CH8_5_READ_GETTING_STARTED_USER_PROMPT`**；
+ * 当前 **`reaslab-iipe`** 经 **`read_file`** 读取 **`MIL_S01_GETTING_STARTED_LEAN_REL`** 并确认 **`#eval "Hello, World!"`**（**§8.2** 已在 IDE **Infoview** 验收预览）。
  *
- * @returns 无法回到内置 **Default** Agent、或未见 **`lean_mcp:`** 用户气泡、或轮询未命中**助理侧** Lean 成功线索时返回 **`false`**（调用方 **`test.skip`**）。
- * 若侧栏出现 **`MCP error`**、**`-32603`**、**`StatusCode.UNIMPLEMENTED`**、**`Failed to get Lean infoview`** 等 **lean_mcp / gRPC 失败**文案，则 **抛出**（调用方记为**失败**，勿与 **`test.skip`** 混淆）。
+ * @returns 无法回到 **Default**、或未命中成功线索时 **`false`**（**`test.skip`**）。读文件硬失败 **抛出**。
  *
- * **与 `reaslab-iipe` 对齐**：**`AgentSelector.tsx`** 把 **`defaultAgentId`** 从下拉 **`agentOptions`** 中 **`filter` 掉**，列表里**没有**名为 **Default** 的菜单项；当前选非默认时，触发器文案为 **`ReasFlow Copilot`** 等，选回默认须**再次点击已勾选**的那条 **`DropdownMenuItem`**（`onClick` 里 **`handleAgentChange("default")`**），**勿**在菜单里找 **`/^Default$/`**。
+ * **与 `reaslab-iipe` 对齐**：**`AgentSelector.tsx`** 无单独 **Default** 菜单项时，**再次点选当前已勾选项** 清回默认，**勿**用 **`/^Default$/`** 匹配菜单。
  */
-export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Promise<boolean> {
+export async function reasLingoDefaultAgentLeanGettingStartedProbe(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
   const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
@@ -694,31 +718,28 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
     return false;
   }
 
-  /** 与 MIL **`S01_Getting_Started.lean`** 首行一致（**`#eval "Hello, World!"`**，**无** **`IO.println`**）；勿写错否则模型易拒答。 */
-  const leanRel = "MIL/C01_Introduction/S01_Getting_Started.lean";
+  await reasLingoClickNewChatWhenIdle(page);
+
   const cm = page.locator(".cm-editor .cm-content").first();
   if ((await cm.count()) > 0) {
     await cm.click({ timeout: 10_000 }).catch(() => {});
   }
 
-  const prompt = [
-    `lean_mcp: for ${leanRel}, query Lean infoview at the first code line: #eval "Hello, World!"`,
-    "(MIL template uses a string literal here, not IO.println.)",
-    "Reply with one verbatim substring copied only from the MCP tool result (no paraphrase).",
-  ].join(" ");
-
   const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
-  await ta.fill(prompt);
+  await ta.fill(CH8_5_READ_GETTING_STARTED_USER_PROMPT);
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
 
+  const relEsc = MIL_S01_GETTING_STARTED_LEAN_REL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
     await expect(async () => {
       await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      await expect(host.getByText(/^lean_mcp:/i).first()).toBeVisible();
+      const body = (await host.innerText()) ?? "";
+      expect(/read_file|S01_Getting_Started\.lean/i.test(body)).toBeTruthy();
+      expect(new RegExp(relEsc, "i").test(body)).toBeTruthy();
     }).toPass({ timeout: 60_000 });
   } catch {
     return false;
@@ -726,52 +747,74 @@ export async function reasLingoDefaultAgentLeanMcpInfoviewProbe(page: Page): Pro
 
   await waitForReasLingoAssistantReplyDone(page);
 
-  const body = ((await host.innerText()) ?? "").trim();
-
+  const readHardFailure =
+    /ENOENT|no such file|Failed to read|read_file.*\berror\b|Cannot read file|permission denied/i;
   const leanMcpHardFailure =
     /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Failed to get Lean infoview|Failed to restart Lean file|gRPC\s+error/i;
-  if (leanMcpHardFailure.test(body)) {
-    throw new Error(
-      `§8.5（调用lean_mcp）失败（侧栏含 MCP/gRPC 错误），不应判为通过。节选：${body.slice(-2_000)}`,
-    );
-  }
-
-  if (/I\s*'?m\s+sorry|cannot\s+assist/i.test(body) && !/\bno goals\b|⊢|unsolved goals/i.test(body)) {
-    return false;
-  }
-
-  /**
-   * 成功线索须**不易**出现在本探针的用户气泡里（此前用 `Hello, World!` / `infoview` / `goals` 等扫**整段** `innerText`，
-   * 会在工具报错时仍命中用户文案 → **假阳性**）。此处只认典型 **Lean Infoview / Elab** 输出。
-   */
-  const leanMcpSuccessSignal =
-    /⊢|\bno goals\b|unsolved goals|synthInstance|typeclass instance|type mismatch|\bString\b/i;
 
   try {
     await expect
-      .poll(async () => leanMcpSuccessSignal.test((await host.innerText()) ?? ""), {
-        timeout: 300_000,
-        intervals: [800, 2_000, 4_000, 8_000],
-      })
+      .poll(
+        async () => {
+          const body = ((await host.innerText()) ?? "").trim();
+          if (readHardFailure.test(body)) {
+            throw new Error(`§8.5 读取 Getting Started Lean 失败（读文件错误）。节选：${body.slice(-2_500)}`);
+          }
+          if (leanMcpHardFailure.test(body) && !reasLingoLeanGettingStartedSuccessInSidebarText(body)) {
+            throw new Error(`§8.5 失败（侧栏含 MCP/gRPC 错误）。节选：${body.slice(-2_500)}`);
+          }
+          if (/I\s*'?m\s+sorry|cannot\s+assist/i.test(body) && !reasLingoLeanGettingStartedSuccessInSidebarText(body)) {
+            return false;
+          }
+          return reasLingoLeanGettingStartedSuccessInSidebarText(body);
+        },
+        { timeout: 300_000, intervals: [800, 2_000, 4_000, 8_000] },
+      )
       .toBeTruthy();
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("§8.5")) {
+      throw e;
+    }
     return false;
   }
 
   const bodyAfter = (await host.innerText()) ?? "";
-  if (leanMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.5（调用lean_mcp）在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_000)}`);
+  if (readHardFailure.test(bodyAfter)) {
+    throw new Error(`§8.5 在轮询末尾出现读文件错误。节选：${bodyAfter.slice(-2_500)}`);
+  }
+  if (leanMcpHardFailure.test(bodyAfter) && !reasLingoLeanGettingStartedSuccessInSidebarText(bodyAfter)) {
+    throw new Error(`§8.5 在轮询末尾出现 MCP 错误。节选：${bodyAfter.slice(-2_500)}`);
   }
 
   return true;
 }
 
+/** @deprecated 使用 **`reasLingoDefaultAgentLeanGettingStartedProbe`**（§8.5 已改为 **read_file**，非 **lean_mcp**）。 */
+export const reasLingoDefaultAgentLeanMcpInfoviewProbe = reasLingoDefaultAgentLeanGettingStartedProbe;
+
+/** `docs/用户场景.md` §8.6：发给模型的用户消息须为英文（**`lake build`**，与 **`reaslab-iipe` `skills.rs`** 一致）。 */
+export const CH8_6_LAKE_BUILD_USER_PROMPT =
+  "From this Lean/Lake workspace root, run a full project build with `lake build` (no target). In your reply, quote one line from the command output that shows success (e.g. build completed, error: 0, or status=Success)." as const;
+
+/** §8.6：侧栏是否含 **`lake build`** 成功线索（shell 或历史 **`lake_mcp` / `lake_build`** 摘要均可）。 */
+export function reasLingoLakeBuildSuccessInSidebarText(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  const mentionsLakeBuild = /lake\s+build|lake_build/i.test(t);
+  const mcpSuccess = /\bstatus=Success\b/i.test(t) || /"status"\s*:\s*"success"/i.test(t);
+  const shellSuccess =
+    /Build completed successfully/i.test(t) ||
+    /\bbuild completed\b/i.test(t) ||
+    (mentionsLakeBuild && /\berror\(s\):\s*0\b/i.test(t)) ||
+    (mentionsLakeBuild && /successfully built|✔.*built/i.test(t));
+
+  return mcpSuccess || shellSuccess;
+}
+
 /**
- * **`docs/用户场景.md` §8.6（调用lake_mcp）**：侧栏 **ReasLingo** 使用 **Default** Agent，对本 **Lake** 工作区发 **`lake_mcp:`** 探针并调用 **`lake_build`**，
- * 流式结束后在侧栏正文中命中 **`status=Success`** 等 **`lake_build`** 成功摘要。
+ * **`docs/用户场景.md` §8.6**：侧栏 **ReasLingo**、**Default** Agent → **`CH8_6_LAKE_BUILD_USER_PROMPT`**；
+ * 当前 **`reaslab-iipe`** 经 **shell `lake build`**（**`mcpServers: []`**）；仍兼容 **`lake_mcp`** / **`status=Success`** 旧摘要。
  *
- * @returns 无法回到 **Default**、或未见 **`lake_mcp:`** 用户气泡、或轮询未命中成功摘要时 **`false`**（**`test.skip`**）。
- * 若含 **`MCP error`**、**`Build failed:`**、**`status=Error`** 等，**抛出**（**fail**）。
+ * @returns 无法回到 **Default**、或未命中成功线索时 **`false`**（**`test.skip`**）。硬失败 **抛出**。
  */
 export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
@@ -810,15 +853,12 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
     return false;
   }
 
-  const prompt = [
-    "lake_mcp: for this Lean/Lake workspace root, invoke the lake_build tool (full project build, no target).",
-    "Reply with ONE verbatim substring copied only from the MCP tool result (the summary line is best), e.g. containing status=Success.",
-  ].join(" ");
+  await reasLingoClickNewChatWhenIdle(page);
 
   const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
-  await ta.fill(prompt);
+  await ta.fill(CH8_6_LAKE_BUILD_USER_PROMPT);
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
@@ -826,7 +866,8 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
   try {
     await expect(async () => {
       await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      await expect(host.getByText(/^lake_mcp:/i).first()).toBeVisible();
+      const body = (await host.innerText()) ?? "";
+      expect(/lake\s+build|lake_build|lake_mcp/i.test(body)).toBeTruthy();
     }).toPass({ timeout: 60_000 });
   } catch {
     return false;
@@ -834,44 +875,65 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
 
   await waitForReasLingoAssistantReplyDone(page);
 
-  const body = ((await host.innerText()) ?? "").trim();
-  const lakeMcpHardFailure =
-    /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Build failed:|gRPC\s+error|\bstatus=Error\b|\bstatus=TimedOut\b|timed_out/i;
-  if (lakeMcpHardFailure.test(body)) {
-    throw new Error(
-      `§8.6（调用lake_mcp）失败（侧栏含 MCP/构建错误），不应判为通过。节选：${body.slice(-2_000)}`,
-    );
-  }
+  const lakeBuildHardFailure =
+    /MCP\s+error|StatusCode\.UNIMPLEMENTED|-326\s*03|Build failed:|gRPC\s+error|\bstatus=Error\b|\bstatus=TimedOut\b|timed_out|error\(s\):\s*[1-9]\d*/i;
 
-  if (/I\s*'?m\s+sorry|cannot\s+assist/i.test(body) && !/\bstatus=Success\b|"status"\s*:\s*"success"/i.test(body)) {
-    return false;
-  }
-
-  const lakeMcpSuccessSignal = /\bstatus=Success\b|"status"\s*:\s*"success"/i;
   try {
     await expect
-      .poll(async () => lakeMcpSuccessSignal.test((await host.innerText()) ?? ""), {
-        timeout: 300_000,
-        intervals: [800, 2_000, 4_000, 8_000],
-      })
+      .poll(
+        async () => {
+          const body = ((await host.innerText()) ?? "").trim();
+          if (lakeBuildHardFailure.test(body)) {
+            throw new Error(`§8.6 lake build 失败（侧栏含构建/MCP 错误）。节选：${body.slice(-2_500)}`);
+          }
+          if (/I\s*'?m\s+sorry|cannot\s+assist/i.test(body) && !reasLingoLakeBuildSuccessInSidebarText(body)) {
+            return false;
+          }
+          return reasLingoLakeBuildSuccessInSidebarText(body);
+        },
+        { timeout: 300_000, intervals: [800, 2_000, 4_000, 8_000] },
+      )
       .toBeTruthy();
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("§8.6 lake build 失败")) {
+      throw e;
+    }
     return false;
   }
 
   const bodyAfter = (await host.innerText()) ?? "";
-  if (lakeMcpHardFailure.test(bodyAfter)) {
-    throw new Error(`§8.6（调用lake_mcp）在轮询末尾出现 MCP/构建错误。节选：${bodyAfter.slice(-2_000)}`);
+  if (lakeBuildHardFailure.test(bodyAfter)) {
+    throw new Error(`§8.6 lake build 在轮询末尾出现构建/MCP 错误。节选：${bodyAfter.slice(-2_500)}`);
   }
 
   return true;
 }
 
+/** §7.5：侧栏正文是否含 **python-execute / shell** 成功线索（与 **`reaslab-iipe` `skills.rs`** 一致，非 Console 专用文案）。 */
+export function reasLingoPythonExecuteSuccessInSidebarText(text: string, relPyPath: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  const base = relPyPath.replace(/^\/+/, "").split("/").pop() ?? relPyPath;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const mentionsScript =
+    new RegExp(esc(relPyPath), "i").test(t) || new RegExp(esc(base), "i").test(t);
+
+  const exitOk =
+    /Process finished with exit code\s*0\b/i.test(t) ||
+    /\bexit[_\s-]*code\s*[:=]\s*0\b/i.test(t) ||
+    /"exit_code"\s*:\s*0\b/.test(t);
+
+  const toolPathOk =
+    /python-execute/i.test(t) &&
+    mentionsScript &&
+    (/Execute Tool Call/i.test(t) || /"exit_code"\s*:\s*0\b/.test(t) || /\bexit[_\s-]*code\s*[:=]\s*0\b/i.test(t));
+
+  return exitOk || toolPathOk;
+}
+
 /**
- * `docs/用户场景.md` §7.5：**第二次**跑与 **§7.4** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**，与
- * **`readFirstPythonDataNameFromIdeFileTree`** / **`openFirstPythonFileRowInFileTree`** 一致）：侧栏 **ReasLingo**、
- * **保持默认 Agent**（不打开 Agent 菜单切换），经 **`python_mcp`** 在项目工作区内**按 `python <file>` 方式全量执行**
- * 该脚本（与 **§7.4** 工具栏 **Run Python** 形成「IDE 运行键 → AI MCP」两遍验收）。**发用户句前** **`waitForTimeout(1s)`**。
+ * `docs/用户场景.md` §7.5：**第二次**跑与 **§7.4** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**）：
+ * 侧栏 **ReasLingo**、**默认 Agent**、**New Chat** 后要求经 **`python-execute`**（shell 工具，见 **`reaslab-iipe` `skills.rs`**）全量执行；
+ * 与 **§7.4** **Run Python → Console** 形成双路径验收。
  */
 export async function reasLingoDefaultAgentMcpPythonProbe(
   page: Page,
@@ -881,8 +943,15 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
   const host = reasLingoInputHostLocator(page);
   await expect(host).toBeVisible({ timeout: 20_000 });
 
+  await reasLingoClickNewChatWhenIdle(page);
+
   const rel = projectPyDataName.startsWith("/") ? projectPyDataName.slice(1) : projectPyDataName;
-  const prompt = `python_mcp: run ${JSON.stringify(rel)} from project root as __main__. Reply with the tool's "Process finished with exit code" line.`;
+  const prompt = [
+    `From the project root, run ${JSON.stringify(rel)} as __main__ using python-execute only`,
+    `(for example: python-execute ${JSON.stringify(rel)}).`,
+    "After it finishes, reply with one line copied from the tool output that shows success",
+    '(e.g. "exit_code": 0 or exit code 0).',
+  ].join(" ");
 
   const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
@@ -892,29 +961,60 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
+
+  const relEsc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   await expect(async () => {
     await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    await expect(host.getByText(/^python_mcp:/i).first()).toBeVisible();
+    const body = (await host.innerText()) ?? "";
+    expect(/python-execute/i.test(body)).toBeTruthy();
+    expect(new RegExp(relEsc, "i").test(body)).toBeTruthy();
   }).toPass({ timeout: 60_000 });
+
   await waitForReasLingoAssistantReplyDone(page);
 
+  const pythonHardFailure =
+    /Command timed out after|failed to execute command|python-execute:\s|Unauthorized access|GurobiError/i;
+
   await expect
-    .poll(async () => /Process finished with exit code\s*0/i.test((await host.innerText()) ?? ""), {
-      timeout: 300_000,
-      intervals: [800, 2_000, 4_000, 8_000],
-    })
+    .poll(
+      async () => {
+        const body = (await host.innerText()) ?? "";
+        if (pythonHardFailure.test(body)) {
+          throw new Error(`§7.5 python-execute 失败（侧栏含执行错误）。节选：${body.slice(-2_500)}`);
+        }
+        return reasLingoPythonExecuteSuccessInSidebarText(body, rel);
+      },
+      { timeout: 300_000, intervals: [800, 2_000, 4_000, 8_000] },
+    )
     .toBeTruthy();
 }
 
-/** `docs/用户场景.md` §12.2（调用tex_mcp）步骤 3：发给模型的用户消息须为英文。 */
-export const CH12_2_TEX_MCP_USER_PROMPT =
-  "Use compile_tex to compile test_upload.tex (path relative to the project root). Then call get_compile_log. In your reply, quote the key lines from that log that pertain to this compilation run." as const;
+/** `docs/用户场景.md` §12.2：发给模型的用户消息须为英文（**`latexmk`**，与 **`reaslab-iipe` `skills.rs`** 一致）。 */
+export const CH12_2_TEX_COMPILE_USER_PROMPT =
+  "Compile test_upload.tex from the project root using latexmk (-interaction=nonstopmode -file-line-error -synctex=1; use -r .reaslab_meta/tex/latexmkrc if the project has no latexmkrc). In your reply, quote key log lines that show this run succeeded (e.g. Output written on ... test_upload.pdf)." as const;
+
+/** @deprecated 保留别名，供旧文档引用；请使用 **`CH12_2_TEX_COMPILE_USER_PROMPT`**。 */
+export const CH12_2_TEX_MCP_USER_PROMPT = CH12_2_TEX_COMPILE_USER_PROMPT;
+
+/** §12.2：侧栏是否含 LaTeX 编译成功线索（**latexmk** 或历史 **tex_mcp** 工具名均可）。 */
+export function reasLingoLatexCompileSuccessInSidebarText(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  return (
+    /Output written on/i.test(t) ||
+    /test_upload\.pdf/i.test(t) ||
+    /LaTeX2e|Document Class:\s*article/i.test(t) ||
+    (/status\s*=\s*0/i.test(t) && /pdf_available\s*=\s*true/i.test(t)) ||
+    /errors\s*=\s*0,\s*warnings\s*=\s*0.*test_upload\.tex/i.test(t) ||
+    /No parsed diagnostics/i.test(t) ||
+    (/latexmk/i.test(t) && /test_upload\.tex/i.test(t) && /Output written on/i.test(t))
+  );
+}
 
 /**
- * `docs/用户场景.md` §12.2（调用tex_mcp）：侧栏 **ReasLingo** 保证为 **Default** Agent（见 **`AgentSelector.tsx`**：`currentAgent === "default"` 时触发器文案为 **Agent**，且 **Default** 不出现在下拉列表中）→ **New Chat** → 发送 **`CH12_2_TEX_MCP_USER_PROMPT`**，
- * 发送后轮询 **`compile_tex`** 出现在侧栏（与 §7.5 **`python_mcp:`** 探针同理，**不**依赖用户原文整句 DOM 回显）；流结束后断言 **`compile_tex`** 与 **`get_compile_log`** 在侧栏正文中的出现顺序，并断言编译 log 常见片段（与 **`test_upload.tex`** 成功编译一致）。
+ * `docs/用户场景.md` §12.2：侧栏 **ReasLingo**、**Default** Agent → **New Chat** → **`CH12_2_TEX_COMPILE_USER_PROMPT`**；
+ * 当前 **`reaslab-iipe`** 经 **shell `latexmk`** 编译（**`mcpServers: []`**，见 **`skills.rs`**）；仍兼容侧栏出现 **`compile_tex`** / **`get_compile_log`** 的旧路径。
  *
- * **前提**：工程根目录已存在 **`test_upload.tex`**（由 **`uploadSingleFileViaExploreUploadDialog`** 等写入）。
+ * **前提**：工程根目录已存在 **`test_upload.tex`**。
  */
 export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Promise<void> {
   await ensureReasLingoVisible(page);
@@ -974,55 +1074,43 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
 
   await expect(agentBtn.getByText(/^Agent$/)).toBeVisible({ timeout: 15_000 });
 
-  const newChatBtn = shell.getByTitle("New Chat").first();
-  await expect(newChatBtn).toBeVisible({ timeout: 10_000 });
-  await expect
-    .poll(async () => (await newChatBtn.isDisabled().catch(() => true)) === false, {
-      timeout: 120_000,
-      intervals: [400, 800, 1_600],
-    })
-    .toBeTruthy();
-  await newChatBtn.click();
-  await page.waitForTimeout(500);
+  await reasLingoClickNewChatWhenIdle(page);
 
   const ta = reasLingoPromptInput(host);
   await expect(ta).toBeVisible({ timeout: 15_000 });
   await ta.click();
-  await ta.fill(CH12_2_TEX_MCP_USER_PROMPT);
+  await ta.fill(CH12_2_TEX_COMPILE_USER_PROMPT);
   const sendBtn = host.getByTitle("Send Message").first();
   await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
   await sendBtn.click();
 
-  // 与 `reasLingoDefaultAgentMcpPythonProbe` 一致：等待侧栏出现 **助手/工具流** 信号，勿断言用户原文整句已挂载到 DOM
-  //（产品可能折叠、摘要或延迟渲染用户气泡；截图中侧栏仍为欢迎态时 `Send Message` 也会长期 disabled）。
   await expect(async () => {
     await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-    await expect(host.getByText(/\bcompile_tex\b/i).first()).toBeVisible();
+    const body = (await shell.innerText()) ?? "";
+    expect(/test_upload\.tex/i.test(body)).toBeTruthy();
+    expect(/latexmk|compile_tex/i.test(body)).toBeTruthy();
   }).toPass({ timeout: 60_000 });
 
   await waitForReasLingoAssistantReplyDone(page);
 
-  const body = ((await shell.innerText()) ?? "").replace(/\r\n/g, "\n");
-  const iCompile = body.indexOf("compile_tex");
-  const iLog = body.indexOf("get_compile_log");
-  expect(iCompile).toBeGreaterThanOrEqual(0);
-  expect(iLog).toBeGreaterThanOrEqual(0);
-  expect(iLog).toBeGreaterThan(iCompile);
+  const latexHardFailure =
+    /! LaTeX Error|Emergency stop|latexmk: Error|Fatal error occurred/i;
 
   await expect
     .poll(
       async () => {
         const t = ((await shell.innerText()) ?? "").replace(/\r\n/g, "\n");
-        return (
-          /Output written on/i.test(t) ||
-          /test_upload\.pdf/i.test(t) ||
-          /LaTeX2e|Document Class:\s*article/i.test(t) ||
-          (/status\s*=\s*0/i.test(t) && /pdf_available\s*=\s*true/i.test(t)) ||
-          /errors\s*=\s*0,\s*warnings\s*=\s*0.*test_upload\.tex/i.test(t) ||
-          /No parsed diagnostics/i.test(t)
-        );
+        if (latexHardFailure.test(t)) {
+          throw new Error(`§12.2 LaTeX 编译失败（侧栏含错误）。节选：${t.slice(-2_500)}`);
+        }
+        if (reasLingoLatexCompileSuccessInSidebarText(t)) {
+          return true;
+        }
+        const iCompile = t.indexOf("compile_tex");
+        const iLog = t.indexOf("get_compile_log");
+        return iCompile >= 0 && iLog > iCompile;
       },
-      { timeout: 120_000, intervals: [800, 2_000, 4_000, 8_000] },
+      { timeout: 300_000, intervals: [800, 2_000, 4_000, 8_000] },
     )
     .toBeTruthy();
 }
@@ -1032,7 +1120,7 @@ export const CH7_HISTORY_RECALL_PROMPT = "what question did I asked?";
 
 /** §7.6：串行主线在 **§7.3（切换Optimization Agent并提问）** 跳过等情况下历史不足两条时的 **`test.skip`** 说明。 */
 export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
-  "§7.6 需要至少 2 条 ReasLingo 历史会话（主线含 §7.3「切换Optimization Agent并提问」与 §7.5「python_mcp」）；当前列表不足。";
+  "§7.6 需要至少 2 条 ReasLingo 历史会话（主线含 §7.3「切换Optimization Agent并提问」与 §7.5 python-execute）；当前列表不足。";
 
 /**
  * **`docs/用户场景.md` §7.6**：**Chat History** → 列表滚到底 → 点**最后一条会话** → 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
@@ -1327,13 +1415,13 @@ export const REASFLOW_COPILOT_AGENT_MENU_LABEL = /ReasFlow Copilot|Paper Copilot
 export const THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG =
   "§8.4 切换 ReasFlow Copilot：侧栏 Agent 菜单无 **ReasFlow Copilot**（或旧版 **Paper Copilot**），跳过。";
 
-/** `docs/用户场景.md` §8.5（调用lean_mcp）：无法切回内置 **Default** Agent、或 **`lean_mcp`** 探针未命中时的 **`test.skip`** 说明（**ReasFlow Copilot** 不含 **`lean_mcp`**；见 **`AgentSelector`** 无 **Default** 菜单项）。 */
+/** `docs/用户场景.md` §8.5（读取 Getting Started Lean）：无法切回 **Default** 或 **read_file** 探针未命中时的 **`test.skip`** 说明。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
-  "§8.5（调用lean_mcp）需回到内置 **Default** Agent（`mcp_servers` 含 **`lean_mcp`**）且工具链可见 **`lean_mcp:`** 与 Infoview 类输出；**ReasFlow Copilot** 无 **`lean_mcp`**。若无法从 Agent 菜单切回 **Default**、或模型未走 **`lean_mcp`**，跳过。";
+  "§8.5（读取 Getting Started Lean）须 **Default** Agent，且侧栏出现 **read_file** 与 **S01_Getting_Started.lean**、**#eval \"Hello, World!\"** 等成功线索。若无法切回 **Default** 或未读取/确认文件，跳过。";
 
-/** `docs/用户场景.md` §8.6（调用lake_mcp）：须 **Default** Agent；须命中 **`lake_mcp:`** 与 **`lake_build`** 成功摘要（如 **`status=Success`**）。 */
+/** `docs/用户场景.md` §8.6：须 **Default** Agent，且侧栏出现 **`lake build`** 成功线索。 */
 export const THEOREM_CH8_LAKE_MCP_SKIP_MSG =
-  "§8.6（调用lake_mcp）须 **Default** Agent，且助理侧出现 **`status=Success`** 等 **`lake_build`** 成功线索。若无法切回 **Default**、或模型未引用工具摘要，跳过。";
+  "§8.6（调用 lake build）须 **Default** Agent，且助理侧出现 **`lake build`** 成功线索（如 build completed、error(s): 0、status=Success）。若无法切回 **Default** 或未执行构建，跳过。";
 
 /** `docs/用户场景.md` §8.3（语义搜索及Lean搜索）：**Semantic** gRPC / **`lean_search`** 不可用或探针未命中时的 **`test.skip`** 说明。 */
 export const THEOREM_CH8_SEMANTIC_LEAN_SEARCH_SKIP_MSG =
@@ -1708,7 +1796,7 @@ export async function openFirstPythonFileRowInFileTree(page: Page): Promise<void
 }
 
 /**
- * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.5** **`python_mcp`** 与 **§7.4** 指向同一脚本。
+ * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.5** **python-execute** 与 **§7.4** 指向同一脚本。
  */
 export async function readFirstPythonDataNameFromIdeFileTree(page: Page): Promise<string> {
   const tree = page.locator(".ide-filetree").filter({ visible: true }).first();

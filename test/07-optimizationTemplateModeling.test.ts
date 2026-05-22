@@ -91,7 +91,7 @@ test.describe("7. 模板创建优化建模项目", () => {
     await ensureReasLingoVisible(page);
     const ok = await reasLingoWhoAreYouProbe(page, /Optimization Agent/i);
     test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 切换Optimization Agent并提问。");
-    // §7.6 需 Chat History ≥2 条：7.5 python_mcp 须在新会话中，勿与 §7.3 共用同一会话。
+    // §7.6 需 Chat History ≥2 条：7.3 结束后已 New Chat；7.5 探针内再 New Chat 后执行 python-execute。
     await reasLingoClickNewChatWhenIdle(page);
   });
 
@@ -124,10 +124,10 @@ test.describe("7. 模板创建优化建模项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §7.5：与 **§7.4** 同一主脚本；**默认 Agent** 下 **第二次**全量执行：**`python_mcp`**
+   * **`docs/用户场景.md`** §7.5：与 **§7.4** 同一主脚本；**默认 Agent** + **New Chat** 下经 **`python-execute`** 再跑一遍
    *（**第一次**为 **§7.4** **Run Python**；`describe` 串行）。
    */
-  test("7.5 调用python_mcp", async ({ page }) => {
+  test("7.5 调用python-execute", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     const pyDataName = await readFirstPythonDataNameFromIdeFileTree(page);

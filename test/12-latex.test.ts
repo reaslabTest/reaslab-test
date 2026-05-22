@@ -53,7 +53,7 @@ async function openTexPreviewThenCompileButton(page: Page): Promise<void> {
 /**
  * **用户场景 §12**：编辑 LaTeX 文件并生成 PDF（见 `docs/用户场景.md`）。
  * **12.1（E2E）**：数学建模项目 **`tryEnterModelingProjectIde`**；上传 **`test/data/test_upload.tex`** → 眼睛打开侧栏 → **Compile** → **canvas**。
- * **§12.2（调用tex_mcp）**（**`tex_mcp`**：**`reasLingoDefaultAgentTexMcpCompileLogProbe`**，与主文档步骤 3～4 一致）。
+ * **§12.2（调用latexmk）**：**`reasLingoDefaultAgentTexMcpCompileLogProbe`**（兼容 **compile_tex**）。
  */
 test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
   test.setTimeout(600_000);
@@ -104,7 +104,7 @@ test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
     });
   });
 
-  test("12.2 调用tex_mcp", async ({ page }) => {
+  test("12.2 调用latexmk", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
@@ -112,7 +112,7 @@ test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
       await uploadSingleFileViaExploreUploadDialog(page, TEST_UPLOAD_TEX);
     });
 
-    await test.step("ReasLingo：Default Agent → New Chat → 英文探针与工具顺序", async () => {
+    await test.step("ReasLingo：Default Agent → New Chat → latexmk 编译探针", async () => {
       await ensureReasLingoVisible(page);
       await reasLingoDefaultAgentTexMcpCompileLogProbe(page);
     });
