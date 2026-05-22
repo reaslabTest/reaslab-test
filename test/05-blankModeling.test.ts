@@ -414,15 +414,13 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await page.getByRole("button", { name: "Project Search" }).click();
     const searchInput = page.getByPlaceholder("Enter to search");
     await expect(searchInput).toBeVisible({ timeout: 15_000 });
-    const projectSearchContent = page
-      .locator('[data-sidebar="group"]')
-      .filter({ has: searchInput })
-      .locator("[data-sidebar='group-content']");
-    await expect(projectSearchContent).toBeVisible({ timeout: 5_000 });
+    // reaslab-iipe `SearchView`：`SidebarGroup` 内直接挂 `GlobalSearchPanel`，已无 `SidebarGroupContent`。
+    const projectSearchPanel = page.locator('[data-sidebar="group"]').filter({ has: searchInput });
+    await expect(projectSearchPanel).toBeVisible({ timeout: 5_000 });
     await searchInput.fill("e");
     await searchInput.press("Enter");
     await expect(
-      projectSearchContent.getByText(/[1-9]\d* results? in \d+ files?/i),
+      projectSearchPanel.getByText(/[1-9]\d* results? in \d+ files?/i),
     ).toBeVisible({ timeout: 20_000 });
 
     const noHitToken = `CH5_NOHIT_${Date.now()}_zzzz`;
@@ -431,11 +429,11 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect
       .poll(
         async () => {
-          const searching = await projectSearchContent.getByText("Searching...").isVisible();
+          const searching = await projectSearchPanel.getByText("Searching...").isVisible();
           if (searching) {
             return "searching";
           }
-          const hitSummary = await projectSearchContent.getByText(/[1-9]\d* results? in \d+ files?/i).count();
+          const hitSummary = await projectSearchPanel.getByText(/[1-9]\d* results? in \d+ files?/i).count();
           return hitSummary > 0 ? "has_hits" : "empty";
         },
         { timeout: 60_000 },
@@ -578,12 +576,12 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
   });
 
-  test("5.12 Menu：更改主题为 One Dark", async ({ page }) => {
+  test("5.12 Menu：更改主题为 Dark", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
 
     await page.getByRole("button", { name: "Menu" }).click();
     const settingsSheet = page
-      .locator('[data-slot="sheet-content"]')
+      .locator('[data-slot="sheet-content"], [role="dialog"]')
       .filter({ visible: true })
       .filter({ has: page.getByText("Theme", { exact: true }) })
       .first();
@@ -599,13 +597,15 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(themeTrigger).toBeVisible({ timeout: 10_000 });
     await themeTrigger.click();
 
-    const oneDarkOption = page
-      .getByRole("option", { name: "One Dark", exact: true })
-      .or(page.locator('[data-slot="select-item"]').filter({ hasText: /^One Dark$/ }).first());
-    await expect(oneDarkOption.first()).toBeVisible({ timeout: 10_000 });
-    await oneDarkOption.first().click();
+    // reaslab-iipe `ThemeSetting`：`IdeThemeMode` 为 light/dark，UI 文案为 Light / Dark（暗色对应 shiki `one-dark-pro`）。
+    const darkOption = page
+      .getByRole("option", { name: "Dark", exact: true })
+      .or(page.locator('[data-slot="select-item"]').filter({ hasText: /^Dark$/ }).first());
+    await expect(darkOption.first()).toBeVisible({ timeout: 10_000 });
+    await darkOption.first().click();
 
-    await expect(themeTrigger).toContainText("One Dark", { timeout: 10_000 });
+    await expect(themeTrigger).toContainText("Dark", { timeout: 10_000 });
+    await expect(page.locator("html")).toHaveAttribute("data-ide-theme-mode", "dark");
 
     await settingsSheet.getByRole("button", { name: "Close" }).click();
     await expect(settingsSheet).toBeHidden({ timeout: 10_000 });

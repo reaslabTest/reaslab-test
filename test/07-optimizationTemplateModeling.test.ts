@@ -14,6 +14,7 @@ import {
   openLeafFile,
   readFirstPythonDataNameFromIdeFileTree,
   ensureReasLingoVisible,
+  reasLingoClickNewChatWhenIdle,
   reasLingoDefaultAgentMcpPythonProbe,
   reasLingoIdeSettingsAiFlow,
   reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou,
@@ -90,6 +91,8 @@ test.describe("7. 模板创建优化建模项目", () => {
     await ensureReasLingoVisible(page);
     const ok = await reasLingoWhoAreYouProbe(page, /Optimization Agent/i);
     test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 切换Optimization Agent并提问。");
+    // §7.6 需 Chat History ≥2 条：7.5 python_mcp 须在新会话中，勿与 §7.3 共用同一会话。
+    await reasLingoClickNewChatWhenIdle(page);
   });
 
   /**
@@ -138,7 +141,7 @@ test.describe("7. 模板创建优化建模项目", () => {
    * 3. 发送 **`what question did I asked?`** → `waitForReasLingoAssistantReplyDone`
    * 4. 侧栏正文含 **`who are you`**（与 §7.3 切换Optimization Agent并提问 对齐）
    *
-   * 依赖同文件串行 **7.3（切换Optimization Agent并提问）+ 7.5 调用python_mcp** 产生多条会话。
+   * 依赖串行 **7.3**（结束后 **New Chat**）+ **7.5** 各产生一条会话。
    */
   test("7.6 切换 AI 历史会话", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
@@ -148,7 +151,7 @@ test.describe("7. 模板创建优化建模项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §7.7：侧栏 **Settings** → **ReasLingo Settings** 虚拟 Tab → **Models** / **User Rules** / **Tools & MCP**；
+   * **`docs/用户场景.md`** §7.7：侧栏 **Settings** → **ReasLingo Settings** 虚拟 Tab → **Models** / **User Rules** / **Tools**；
    * 与 **`reasLingoIdeSettingsAiFlow`**（**`helpers.ts`**）步骤一致。
    */
   test("7.7 设置 AI（齿轮：模型、用户规则、Tools & MCP）", async ({ page }) => {

@@ -340,6 +340,26 @@ export function reasLingoPromptInput(reasLingoInputHost: Locator): Locator {
   return reasLingoInputHost.getByRole("textbox").or(reasLingoInputHost.locator("textarea")).first();
 }
 
+/**
+ * 侧栏 **ReasLingo** → **`title="New Chat"`**（`ReasLingoHeader.tsx` / `ReasLingoChatArea.tsx` 的 `createSession`）。
+ * 用于 §7.3 结束后为 §7.5 另开一条会话，使 §7.6 Chat History 至少两条。
+ */
+export async function reasLingoClickNewChatWhenIdle(page: Page): Promise<void> {
+  await ensureReasLingoVisible(page);
+  const host = reasLingoInputHostLocator(page);
+  await expect(host).toBeVisible({ timeout: 20_000 });
+  const newChatBtn = host.getByTitle("New Chat").first();
+  await expect(newChatBtn).toBeVisible({ timeout: 10_000 });
+  await expect
+    .poll(async () => (await newChatBtn.isDisabled().catch(() => true)) === false, {
+      timeout: 120_000,
+      intervals: [400, 800, 1_600],
+    })
+    .toBeTruthy();
+  await newChatBtn.click();
+  await page.waitForTimeout(500);
+}
+
 /** 在 ReasLingo 输入框用 `@` 选中工程内已有文件（与 `useAtMention` / `AtMentionPopover` 一致）。 */
 export async function reasLingoAttachProjectFileViaAtMention(
   page: Page,
@@ -1018,8 +1038,8 @@ export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
  * **`docs/用户场景.md` §7.6**：**Chat History** → 列表滚到底 → 点**最后一条会话** → 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
  * 流结束后侧栏正文含 **`who are you`**（与 **§7.3（切换Optimization Agent并提问）** 用户消息对齐）。
  *
- * **会话行定位**：`reaslab-iipe` 的 **`SessionItem`** 为原生 **`<button type="button">`**；**`zlj`** 等为 **`div role="button"`**。
- * 须用 **`getByRole("button", { name: /\d+\s+messages/ })`**，**勿**用 **`div[role="button"]`**（在 iipe 上会恒为 **0** 条 → 误判「不足两条」而 **`test.skip`**）。
+ * **会话行定位**：`reaslab-iipe` **`SessionItem`** 为 **`div role="button"`**（标题 + **`N messages`**）；行内另有 Rename/Delete 等原生 **`<button>`**，
+ * 须用 **`div[role="button"][tabindex="0"]` + `hasText(/\d+\s+messages/)`**，避免把操作钮算进会话数。
  *
  * @returns **`true`** 已断言成功；**`false`** 表示历史少于 **2** 条（调用方 **`test.skip`**）。
  */
@@ -1039,7 +1059,7 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
   });
 
   const pop = chatHistoryPopover();
-  const sessionRows = pop.getByRole("button", { name: /\d+\s+messages/i });
+  const sessionRows = pop.locator('div[role="button"][tabindex="0"]').filter({ hasText: /\d+\s+messages/i });
 
   try {
     await expect
@@ -1104,12 +1124,12 @@ export const MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG =
 export const CH7_SETTINGS_USER_RULE_TEXT = "Always response in English";
 
 /**
- * 内层 **Models / User Rules / Tools & MCP** 的 **`tablist`**（与 **`ReasLingoSettings.tsx`** 一致）；
- * 用 **`has`「Tools & MCP」** 与顶层编辑器文件 **TabsList** 区分。
+ * 内层 **Models / User Rules / Tools** 的 **`tablist`**（与 **`ReasLingoSettings.tsx`** 一致）；
+ * 用 **`has`「Tools」** 与顶层编辑器文件 **TabsList** 区分（旧版 Tab 文案为 **Tools & MCP**，已移除）。
  */
 function reasLingoIdeSettingsInnerTablist(page: Page): Locator {
   return page.getByRole("tablist").filter({
-    has: page.getByRole("tab", { name: "Tools & MCP", exact: true }),
+    has: page.getByRole("tab", { name: "Tools", exact: true }),
   });
 }
 
@@ -1137,7 +1157,7 @@ export async function reasLingoCloseIdeAiSettingsTab(page: Page): Promise<void> 
 }
 
 /**
- * **`docs/用户场景.md` §7.7**：**Models**（SiliconFlow、**`test`** 占位模型）→ **User Rules** → **Tools & MCP**（4 个 MCP）→
+ * **`docs/用户场景.md` §7.7**：**Models**（SiliconFlow、**`test`** 占位模型）→ **User Rules** → **Tools**（**Semantic Scholar** API Key 区块）→
  * 关闭设置；侧栏 **Switch Model** 列表中可见 **`test`**。
  *
  * @returns **`false`** 仅当找不到 **SiliconFlow** 展开行（调用方 **`test.skip`**）；其余步骤失败时 **抛出**。
@@ -1149,7 +1169,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
   /** **`ReasLingoSettings`** 内层 **`TabsPrimitive.Root`**（`data-slot="tabs"`），比 **`role=tabpanel` + name** 更稳（**Base UI Tabs** 与 **keepMounted** 并存时）。 */
   const settingsTabsRoot = page
     .locator('[data-slot="tabs"]')
-    .filter({ has: page.getByRole("tab", { name: "Tools & MCP", exact: true }) })
+    .filter({ has: page.getByRole("tab", { name: "Tools", exact: true }) })
     .first();
   await expect(settingsTabsRoot).toBeVisible({ timeout: 15_000 });
 
@@ -1235,17 +1255,23 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     });
   });
 
-  await test.step("§7.7-4 Tools & MCP：MCP Servers ×4", async () => {
-    await innerTabs.getByRole("tab", { name: "Tools & MCP", exact: true }).click();
-    const toolsPanel = page.getByRole("tabpanel", { name: "Tools & MCP", exact: true });
+  await test.step("§7.7-4 Tools：Semantic Scholar API key 区块", async () => {
+    await innerTabs.getByRole("tab", { name: "Tools", exact: true }).click();
+    const toolsPanel = page.getByRole("tabpanel", { name: "Tools", exact: true });
     await expect(toolsPanel).toBeVisible({ timeout: 15_000 });
-    /** 线上标题为 **MCP Servers**（非历史文案 *Installed MCP Servers*）。 */
-    await expect(toolsPanel.getByRole("heading", { name: "MCP Servers", exact: true })).toBeVisible({
+    await expect(toolsPanel.getByRole("heading", { name: "Tools", exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    for (const id of ["python_mcp", "tex_mcp", "lean_mcp", "lake_mcp"] as const) {
-      await expect(toolsPanel.getByText(id, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-    }
+    await expect(toolsPanel.getByText("Semantic Scholar", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(toolsPanel.getByPlaceholder("Paste your API key...")).toBeVisible({ timeout: 15_000 });
+    await expect(toolsPanel.getByRole("button", { name: "Test", exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(toolsPanel.getByRole("button", { name: "Save", exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   await test.step("§7.7-5 关闭设置；侧栏 Switch Model 列表含 test", async () => {
