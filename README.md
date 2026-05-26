@@ -45,6 +45,8 @@ pnpm install
 | `test/11-footer-links.test.ts` | `pnpm run test:11` | `pnpm run test:11:headed` |
 | `test/12-latex.test.ts` | `pnpm run test:12` | `pnpm run test:12:headed` |
 | `test/13-project-list.test.ts` | `pnpm run test:13` | `pnpm run test:13:headed` |
+| `test/14-browse-templates.test.ts` | `pnpm run test:14` | `pnpm run test:14:headed` |
+| `test/15-reaslingo-home.test.ts` | `pnpm run test:15` | `pnpm run test:15:headed` |
 
 新增 **`test/`** 下的测试文件时，请在 **`package.json`** 按 **`test:<编号>`** 补成对脚本（无头 + `:headed`），`playwright` 命令里写路径如 **`test/05-foo.test.ts`**。
 

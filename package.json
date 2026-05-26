@@ -31,6 +31,10 @@
     "test:12:headed": "playwright test --config common/playwright.config.ts test/12-latex.test.ts --headed",
     "test:13": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts",
     "test:13:headed": "playwright test --config common/playwright.config.ts test/13-project-list.test.ts --headed",
+    "test:14": "playwright test --config common/playwright.config.ts test/14-browse-templates.test.ts",
+    "test:14:headed": "playwright test --config common/playwright.config.ts test/14-browse-templates.test.ts --headed",
+    "test:15": "playwright test --config common/playwright.config.ts test/15-reaslingo-home.test.ts",
+    "test:15:headed": "playwright test --config common/playwright.config.ts test/15-reaslingo-home.test.ts --headed",
 
     "reaslab-test": "node run.mjs --scope-file=common/run-scope-beta.txt",
 
