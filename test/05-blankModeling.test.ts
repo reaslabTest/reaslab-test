@@ -20,9 +20,9 @@ import {
 
 const TEST_UPLOAD_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "test_upload.png");
 
-/** §5.4：`reaslab-agent` 走 ACP `authenticate`（llm-gateway）；未通过时 `acp-client` toast 且无法发 prompt。 */
+/** §5.4：默认 Agent（`reaslab-agent`）走 ACP `authenticate`（llm-gateway）；未通过时 `acp-client` toast 且无法发 prompt。 */
 const MODELING_CH5_4_ACP_AUTH_SKIP_MSG =
-  "§5.4：ReasLab Agent（ACP）需 llm-gateway 认证；当前环境 authenticate 未通过（toast「Authentication required before sending a prompt」），跳过。";
+  "§5.4：默认 Agent（ACP）需 llm-gateway 认证；当前环境 authenticate 未通过（toast「Authentication required before sending a prompt」），跳过。";
 
 /** 与 `@reaslab/file-tree` 节点 `data-name` 一致；避免树上另有 `/test_upload.png` 时 `getByText` 触发 strict 双匹配。 */
 function chatUploadsTestPngTreeLabel(fileTree: Locator) {
@@ -85,7 +85,7 @@ async function sendReasLingoPromptAndWaitForReply(
 }
 
 /**
- * §5.4：ReasLab Agent 发 prompt 前须 ACP 已认证；失败时 toast 且不会出现 Stop/Receiving。
+ * §5.4：默认 Agent 发 prompt 前须 ACP 已认证；失败时 toast 且不会出现 Stop/Receiving。
  * 勿长时间死等 `sendReasLingoPromptAndWaitForReply` 的 180s 流式信号。
  */
 async function sendReasLingoPromptOrSkipOnAcpAuth(
@@ -144,7 +144,7 @@ async function widenViewportForReasLingoInputToolbar(page: Page): Promise<void> 
   await page.setViewportSize({ width: 1680, height: 900 });
 }
 
-/** §5.9～§5.11：`MessageInput` 仅在 **default** Agent 时渲染 Chain of Thought / Web Search / More Settings；§5.4 后须切回默认。 */
+/** §5.9～§5.11：`MessageInput` 仅在 **default** Agent 时渲染 Chain of Thought / Web Search / More Settings。 */
 async function ensureDefaultAgentForReasLingoInputToolbar(
   page: Page,
   reasLingoInputHost: Locator,
@@ -153,18 +153,17 @@ async function ensureDefaultAgentForReasLingoInputToolbar(
   if (await defaultAgentTrigger.isVisible().catch(() => false)) {
     return;
   }
-  const nonDefaultAgentTrigger = reasLingoInputHost
-    .getByRole("button", { name: /ReasLab Agent/i })
-    .or(reasLingoInputHost.locator('button[title="Switch Agent"]'));
-  await expect(nonDefaultAgentTrigger.first()).toBeVisible({ timeout: 15_000 });
-  await nonDefaultAgentTrigger.first().click();
+  const agentTrigger = reasLingoInputHost.locator('button[title="Switch Agent"]');
+  await expect(agentTrigger.first()).toBeVisible({ timeout: 15_000 });
+  await agentTrigger.first().click();
   const agentMenuPanel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
   await expect(agentMenuPanel).toBeVisible({ timeout: 10_000 });
-  const reasLabRow = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
-    hasText: /ReasLab Agent/i,
+  // `AgentSelector`：默认 Agent 不在菜单中；再次点击当前选中项可切回 default。
+  const activeItem = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
+    has: page.locator("svg.lucide-check"),
   });
-  await expect(reasLabRow.first()).toBeVisible({ timeout: 10_000 });
-  await reasLabRow.first().click();
+  await expect(activeItem.first()).toBeVisible({ timeout: 10_000 });
+  await activeItem.first().click();
   await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
   await expect(reasLingoInputHost.getByRole("button", { name: /^Agent$/i })).toBeVisible({
     timeout: 15_000,
@@ -338,38 +337,27 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expectLastAssistantNumeralAnswer(reasLingoInputHost, "4");
   });
 
-  test("5.4 切换 ReasLab Agent 进行 AI 会话", async ({ page }) => {
+  test("5.4 默认 Agent 进行 AI 会话", async ({ page }) => {
     test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
     await ensureReasLingoVisible(page);
 
     const { reasLingoInputHost } = reasLingoHosts(page);
 
-    const agentTrigger = reasLingoInputHost
-      .getByRole("button", { name: /^Agent$/i })
-      .or(reasLingoInputHost.locator('button[title="Switch Agent"]'));
-    await expect(agentTrigger.first()).toBeVisible({ timeout: 15_000 });
-    await agentTrigger.first().click();
+    // `AgentSelector` 过滤 defaultAgentId，菜单仅列 Math Modeling / ReasFlow Copilot 等；默认态按钮文案为 **Agent**。
+    await ensureDefaultAgentForReasLingoInputToolbar(page, reasLingoInputHost);
+    const agentTrigger = reasLingoInputHost.getByRole("button", { name: /^Agent$/i });
+    await expect(agentTrigger).toBeVisible({ timeout: 15_000 });
+    await agentTrigger.click();
     const agentMenuPanel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
     await expect(agentMenuPanel).toBeVisible({ timeout: 10_000 });
-    const reasLabAgent = agentMenuPanel.locator('[data-slot="dropdown-menu-item"]').filter({
-      hasText: /ReasLab Agent/i,
-    });
-    await expect(
-      reasLabAgent.first(),
-      [
-        "§5.4：Agent 菜单中未找到「ReasLab Agent」项（须在正式环境提供）。",
-        "若为菜单结构或展示名变更，请同步更新本用例的 locator / 文案匹配。",
-      ].join(" "),
-    ).toBeVisible({ timeout: 15_000 });
-    await reasLabAgent.first().click();
+    await expect(agentMenuPanel.getByRole("menuitem").first()).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press("Escape");
     await expect(agentMenuPanel).toBeHidden({ timeout: 5_000 });
-    await expect(reasLingoInputHost.getByRole("button", { name: /ReasLab Agent/i })).toBeVisible({
-      timeout: 15_000,
-    });
-    // §5.3 常开 Auto；关闭后再发（ReasLab Agent 下无 Web Search，勿用 ensureWebSearchControlReady）。
+
+    // §5.3 常开 Auto；关闭后再发（默认 Agent 下可走 Web Search，此处勿依赖 ensureWebSearchControlReady）。
     await turnOffReasLingoAutoModel(page, reasLingoInputHost);
 
-    // 图片/OCR 在 §5.3 已覆盖；ReasLab Agent 走 ACP，未认证时 skip（勿死等 180s 流式）。
+    // 图片/OCR 在 §5.3 已覆盖；默认 Agent 走 ACP，未认证时 skip（勿死等 180s 流式）。
     await sendReasLingoPromptOrSkipOnAcpAuth(page, reasLingoInputHost, "who are you?");
   });
 

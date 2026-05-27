@@ -270,18 +270,49 @@ function chatSessionByTitle(page: Page, title: string): Locator {
   });
 }
 
+function normalizeSessionRowText(text: string | null): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+async function snapshotChatSessionRows(page: Page): Promise<Set<string>> {
+  const buttons = chatSessionButtons(page);
+  const n = await buttons.count();
+  const rows = new Set<string>();
+  for (let i = 0; i < n; i++) {
+    rows.add(normalizeSessionRowText(await buttons.nth(i).innerText()));
+  }
+  return rows;
+}
+
+/** 发消息后 sidebar 不一定给 active 行加 `ring-primary`；用列表 diff 定位新会话行。 */
+async function findNewChatSession(page: Page, beforeRows: Set<string>): Promise<Locator> {
+  let found: Locator | undefined;
+  await expect
+    .poll(async () => {
+      const buttons = chatSessionButtons(page);
+      const n = await buttons.count();
+      for (let i = 0; i < n; i++) {
+        const row = normalizeSessionRowText(await buttons.nth(i).innerText());
+        if (!beforeRows.has(row)) {
+          found = buttons.nth(i);
+          return true;
+        }
+      }
+      return false;
+    }, { timeout: 60_000 })
+    .toBe(true);
+  return found!;
+}
+
 async function renameChatSession(page: Page, session: Locator, newTitle: string): Promise<void> {
   await session.scrollIntoViewIfNeeded();
   await session.hover();
-  const titleInput = session.getByRole("textbox");
-  if (!(await titleInput.isVisible().catch(() => false))) {
+  if (!(await session.getByRole("textbox").isVisible().catch(() => false))) {
     await session.getByTitle("Rename").click();
   }
+  const titleInput = session.getByRole("textbox");
   await expect(titleInput).toBeVisible({ timeout: 10_000 });
-  await titleInput.click();
-  await titleInput.clear();
   await titleInput.fill(newTitle);
-  await expect(titleInput).toHaveValue(newTitle);
   // 输入框在 role=button 会话行内，Enter 易冒泡；与 SessionItem 的 Save 一致。
   await session.getByTitle("Save").click();
   await expect(chatSessionByTitle(page, newTitle)).toBeVisible({ timeout: 30_000 });
@@ -293,27 +324,6 @@ function chatSessionSearchInput(page: Page): Locator {
 
 function noMatchingConversations(page: Page): Locator {
   return chatsLeftPanel(page).getByText("No matching conversations", { exact: true });
-}
-
-/**
- * 侧栏搜索可能尚未索引刚发送的消息；出现 **No matching conversations** 亦视为搜索功能正常。
- * 此时回退到当前 active 会话（或列表首条）继续 Rename / 切换。
- */
-async function resolveChatSessionAfterSearch(page: Page, query: string): Promise<Locator> {
-  const search = chatSessionSearchInput(page);
-  await search.fill(query);
-  if (await noMatchingConversations(page).isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await search.fill("");
-    const active = chatSessionButtons(page).filter({ has: page.locator('[class*="ring-primary"]') });
-    if ((await active.count()) > 0) {
-      return active.first();
-    }
-    return chatSessionButtons(page).first();
-  }
-  const session = chatSessionButtons(page).first();
-  await expect(session).toBeVisible({ timeout: 15_000 });
-  await search.fill("");
-  return session;
 }
 
 /** Share 会 `openTab(reaslingo://share)` 并收起左栏；须点 **Cancel** 关闭 Share Chat Tab（Escape 无效）。 */
@@ -359,119 +369,121 @@ function settingsInnerTablist(page: Page): Locator {
 }
 
 test.describe("15. 首页顶栏 ReasLingo", () => {
+  test.describe.configure({ mode: "serial" });
   test.setTimeout(360_000);
 
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1680, height: 900 });
   });
 
-  test("15.1～15.4 全局 ReasLingo 工作区", async ({ page }) => {
+  test("15.1 从首页进入全局 ReasLingo", async ({ page }) => {
+    await openGlobalReasLingoFromHome(page);
+  });
+
+  test("15.2 右栏 Files：增删改查与上传", async ({ page }) => {
     const stamp = Date.now();
     const folderName = `e2e-ch15-dir-${stamp}`;
     const fileName = `e2e-ch15-${stamp}.txt`;
     const renamedFile = `e2e-ch15-renamed-${stamp}.txt`;
     const fileMarker = `marker-ch15-${stamp}`;
+
+    await openGlobalReasLingoFromHome(page);
+    await ensureIdeAgentFilesPanel(page);
+
+    await createTreeNode(page, "Create new folder", folderName);
+    await fileTreeNode(page, folderName).click();
+    await createTreeNode(page, "Create New File", fileName);
+
+    await fileTreeNode(page, fileName).click();
+    const editor = page.locator(".cm-content").first();
+    await expect(editor).toBeVisible({ timeout: 30_000 });
+    await editor.click();
+    await editor.pressSequentially(fileMarker);
+    await page.keyboard.press("Control+s");
+
+    await openContextMenuRenameDelete(page, fileName);
+
+    const uploadBtn = fileTreeUploadButton(page);
+    if (await uploadBtn.isVisible().catch(() => false)) {
+      await uploadBtn.click();
+      const uploadDialog = page.getByRole("dialog", { name: "Upload Files", exact: true });
+      await expect(uploadDialog).toBeVisible({ timeout: 15_000 });
+      const fileInput = uploadDialog.locator('input[type="file"]:not([webkitdirectory])').first();
+      await fileInput.setInputFiles(TEST_UPLOAD_PNG);
+      await expect(uploadDialog).toBeHidden({ timeout: 180_000 });
+    }
+
+    await renameFileTreeNode(page, fileName, renamedFile);
+
+    await searchAndOpenFileInIdeAgent(page, fileMarker, renamedFile);
+
+    await ensureIdeAgentFilesPanel(page);
+    await fileTreeNode(page, folderName).click({ button: "right" });
+    await expect(fileTreeContextMenu(page)).toBeVisible({ timeout: 10_000 });
+    await fileTreeContextMenuItem(page, "Delete").click();
+    const deleteDialog = page.locator('[data-slot="alert-dialog-content"]').filter({
+      hasText: /Are you sure you want to delete/i,
+    });
+    await expect(deleteDialog).toBeVisible({ timeout: 20_000 });
+    await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(deleteDialog).toBeHidden({ timeout: 60_000 });
+  });
+
+  test("15.3 设置：Models / User Rules / Tools", async ({ page }) => {
+    await openGlobalReasLingoFromHome(page);
+    await ideAgentHeader(page).getByTitle("Settings").click();
+    const tabs = settingsInnerTablist(page);
+    await expect(tabs.getByRole("tab", { name: "Models", exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(tabs.getByRole("tab", { name: "User Rules", exact: true })).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: "Tools", exact: true })).toBeVisible();
+    await ideAgentHeader(page).getByTitle("Settings").click();
+    await expect(rightPanelHeader(page)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("15.4 左侧会话历史", async ({ page }) => {
+    const stamp = Date.now();
     const sessionTokenA = `e2e-ch15-A-${stamp}`;
     const sessionMsgA = `Reply with exactly ${sessionTokenA} and nothing else.`;
     const sessionTitleA = sessionTokenA;
 
-    await test.step("15.1 从首页进入全局 ReasLingo", async () => {
-      await openGlobalReasLingoFromHome(page);
+    await openGlobalReasLingoFromHome(page);
+
+    const beforeSessionRows = await snapshotChatSessionRows(page);
+    const baselineSessionCount = beforeSessionRows.size;
+
+    await chatsLeftPanel(page).getByTitle("New Chat").click();
+    await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 30_000 });
+
+    await ideAgentSendUserMessage(page, sessionMsgA, sessionTokenA);
+    await expect
+      .poll(async () => await chatSessionButtons(page).count(), { timeout: 60_000 })
+      .toBeGreaterThan(baselineSessionCount);
+    await renameChatSession(page, await findNewChatSession(page, beforeSessionRows), sessionTitleA);
+    await chatSessionSearchInput(page).fill("");
+
+    await switchAwayFromSession(page, sessionTitleA);
+
+    await chatSessionByTitle(page, sessionTitleA).click();
+    await expect(ideAgentShell(page).getByText(sessionTokenA, { exact: true }).first()).toBeVisible({
+      timeout: 60_000,
     });
 
-    await test.step("15.2 右栏 Files：增删改查与上传", async () => {
-      await ensureIdeAgentFilesPanel(page);
+    await chatSessionSearchInput(page).fill(`zzznomatch-${stamp}`);
+    await expect(noMatchingConversations(page)).toBeVisible({ timeout: 30_000 });
+    await chatSessionSearchInput(page).fill("");
 
-      await createTreeNode(page, "Create new folder", folderName);
-      await fileTreeNode(page, folderName).click();
-      await createTreeNode(page, "Create New File", fileName);
+    const targetSession = chatSessionByTitle(page, sessionTitleA);
+    await targetSession.hover();
+    await targetSession.getByTitle("Send copy to collaborators").click();
+    await expect(page.getByPlaceholder("Search recipients...")).toBeVisible({ timeout: 30_000 });
+    await closeShareChatPanel(page);
 
-      await fileTreeNode(page, fileName).click();
-      const editor = page.locator(".cm-content").first();
-      await expect(editor).toBeVisible({ timeout: 30_000 });
-      await editor.click();
-      await editor.pressSequentially(fileMarker);
-      await page.keyboard.press("Control+s");
-
-      await openContextMenuRenameDelete(page, fileName);
-
-      const uploadBtn = fileTreeUploadButton(page);
-      if (await uploadBtn.isVisible().catch(() => false)) {
-        await uploadBtn.click();
-        const uploadDialog = page.getByRole("dialog", { name: "Upload Files", exact: true });
-        await expect(uploadDialog).toBeVisible({ timeout: 15_000 });
-        const fileInput = uploadDialog.locator('input[type="file"]:not([webkitdirectory])').first();
-        await fileInput.setInputFiles(TEST_UPLOAD_PNG);
-        await expect(uploadDialog).toBeHidden({ timeout: 180_000 });
-      }
-
-      await renameFileTreeNode(page, fileName, renamedFile);
-
-      await searchAndOpenFileInIdeAgent(page, fileMarker, renamedFile);
-
-      await ensureIdeAgentFilesPanel(page);
-      await fileTreeNode(page, folderName).click({ button: "right" });
-      await expect(fileTreeContextMenu(page)).toBeVisible({ timeout: 10_000 });
-      await fileTreeContextMenuItem(page, "Delete").click();
-      const deleteDialog = page.locator('[data-slot="alert-dialog-content"]').filter({
-        hasText: /Are you sure you want to delete/i,
-      });
-      await expect(deleteDialog).toBeVisible({ timeout: 20_000 });
-      await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
-      await expect(deleteDialog).toBeHidden({ timeout: 60_000 });
-    });
-
-    await test.step("15.3 设置：Models / User Rules / Tools", async () => {
-      await ideAgentHeader(page).getByTitle("Settings").click();
-      const tabs = settingsInnerTablist(page);
-      await expect(tabs.getByRole("tab", { name: "Models", exact: true })).toBeVisible({ timeout: 30_000 });
-      await expect(tabs.getByRole("tab", { name: "User Rules", exact: true })).toBeVisible();
-      await expect(tabs.getByRole("tab", { name: "Tools", exact: true })).toBeVisible();
-      await ideAgentHeader(page).getByTitle("Settings").click();
-      await expect(rightPanelHeader(page)).toBeVisible({ timeout: 30_000 });
-    });
-
-    await test.step("15.4 左侧会话历史", async () => {
-      const baselineSessionCount = await chatSessionButtons(page).count();
-
-      await chatsLeftPanel(page).getByTitle("New Chat").click();
-      await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 30_000 });
-
-      await ideAgentSendUserMessage(page, sessionMsgA, sessionTokenA);
-      await expect
-        .poll(async () => await chatSessionButtons(page).count(), { timeout: 60_000 })
-        .toBeGreaterThan(baselineSessionCount);
-      await renameChatSession(
-        page,
-        await resolveChatSessionAfterSearch(page, sessionTokenA),
-        sessionTitleA,
-      );
-      await chatSessionSearchInput(page).fill("");
-
-      await switchAwayFromSession(page, sessionTitleA);
-
-      await chatSessionByTitle(page, sessionTitleA).click();
-      await expect(ideAgentShell(page).getByText(sessionTokenA, { exact: true }).first()).toBeVisible({
-        timeout: 60_000,
-      });
-
-      await chatSessionSearchInput(page).fill(`zzznomatch-${stamp}`);
-      await expect(noMatchingConversations(page)).toBeVisible({ timeout: 30_000 });
-      await chatSessionSearchInput(page).fill("");
-
-      const targetSession = chatSessionByTitle(page, sessionTitleA);
-      await targetSession.hover();
-      await targetSession.getByTitle("Send copy to collaborators").click();
-      await expect(page.getByPlaceholder("Search recipients...")).toBeVisible({ timeout: 30_000 });
-      await closeShareChatPanel(page);
-
-      await ensureChatsLeftPanelOpen(page);
-      await chatSessionSearchInput(page).fill("");
-      const sessionToDelete = chatSessionByTitle(page, sessionTitleA);
-      await expect(sessionToDelete).toBeVisible({ timeout: 15_000 });
-      await sessionToDelete.hover();
-      await sessionToDelete.getByTitle("Delete session").click();
-      await expect(chatSessionByTitle(page, sessionTitleA)).toBeHidden({ timeout: 30_000 });
-    });
+    await ensureChatsLeftPanelOpen(page);
+    await chatSessionSearchInput(page).fill("");
+    const sessionToDelete = chatSessionByTitle(page, sessionTitleA);
+    await expect(sessionToDelete).toBeVisible({ timeout: 15_000 });
+    await sessionToDelete.hover();
+    await sessionToDelete.getByTitle("Delete session").click();
+    await expect(chatSessionByTitle(page, sessionTitleA)).toBeHidden({ timeout: 30_000 });
   });
 });

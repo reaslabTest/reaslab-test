@@ -4,8 +4,9 @@ import { absUrl } from "../common/global-setup";
 
 /**
  * **用户场景 §11**：页脚导航链接可正常跳转（见 `docs/用户场景.md`）。
- * 覆盖：`reaslab-iipe` `app/home/footer.tsx` 中 **Products** / **Templates** / **Resources** / **About**；
- * **Products**、**Templates**、**Playground** 为 React Router **`Link`**（同页跳转）；**User Guide** / **Blog** / **Publications** / **ReasLab** 为 **`target="_blank"`**（popup）。
+ * 覆盖：`reaslab-iipe` `app/home/footer.tsx` 中 **Products** / **Templates** / **Resources** / **Support**；
+ * **Products**、**Templates**、**Playground** 为 React Router **`Link`**（同页跳转）；
+ * **Arena** / **Publications** / **GitHub** / **User Guide** / **Blog** 为 **`target="_blank"`**（popup）。
  *
  * 单文件调试：`pnpm run test:11:headed`
  */
@@ -87,7 +88,7 @@ test.describe("11. 页脚导航链接", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
   test.setTimeout(300_000);
 
-  test("11.1 检查模板/资源/关于", async ({ page }) => {
+  test("11.1 检查模板/资源/支持", async ({ page }) => {
     await gotoMarketingHome(page);
 
     await test.step("Products · Mathematical Modeling → /model", async () => {
@@ -126,21 +127,13 @@ test.describe("11. 页脚导航链接", () => {
       await gotoMarketingHome(page);
     });
 
+    await test.step("Resources · Arena → arena.reaslab.io", async () => {
+      await assertFooterLinkOpensPopup(page, "Arena", hostnameOneOf("arena.reaslab.io"));
+    });
+
     await test.step("Resources · Playground → /playground", async () => {
       await assertFooterLinkNavigatesSameTab(page, "Playground", pathnameMatches(/^\/playground\/?$/i));
       await gotoMarketingHome(page);
-    });
-
-    await test.step("Resources · User Guide → docs.reaslab.io", async () => {
-      await assertFooterLinkOpensPopup(
-        page,
-        "User Guide",
-        (u) => hostnameOneOf("docs.reaslab.io")(u) && /\/guides\//i.test(u),
-      );
-    });
-
-    await test.step("Resources · Blog → blog.reaslab.io", async () => {
-      await assertFooterLinkOpensPopup(page, "Blog", hostnameOneOf("blog.reaslab.io"));
     });
 
     await test.step("Resources · Publications → blog.reaslab.io/publications", async () => {
@@ -151,8 +144,8 @@ test.describe("11. 页脚导航链接", () => {
       );
     });
 
-    await test.step("About · ReasLab → github.com/reaslab", async () => {
-      await assertFooterLinkOpensPopup(page, "ReasLab", (u) => {
+    await test.step("Support · GitHub → github.com/reaslab", async () => {
+      await assertFooterLinkOpensPopup(page, "GitHub", (u) => {
         try {
           const { hostname, pathname } = new URL(u);
           return (
@@ -163,6 +156,18 @@ test.describe("11. 页脚导航链接", () => {
           return false;
         }
       });
+    });
+
+    await test.step("Support · User Guide → docs.reaslab.io", async () => {
+      await assertFooterLinkOpensPopup(
+        page,
+        "User Guide",
+        (u) => hostnameOneOf("docs.reaslab.io")(u) && /\/guides\//i.test(u),
+      );
+    });
+
+    await test.step("Support · Blog → blog.reaslab.io", async () => {
+      await assertFooterLinkOpensPopup(page, "Blog", hostnameOneOf("blog.reaslab.io"));
     });
   });
 });

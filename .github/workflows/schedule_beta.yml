@@ -1,4 +1,4 @@
-# 站点 A（全量 scope）：**`common/run-scope-beta.txt`**。子集与 **`schedule_test.yml`** 配对；**`E2E_BASE_URL`** 在本文件 **`env`** 写死（换站请改字面量）。
+# 全量 scope：**`common/run-scope-beta.txt`**。**`E2E_BASE_URL`** 在本文件 **`env`** 写死（换站请改字面量）。
 # 每 6 小时执行（UTC）：`pnpm run reaslab-test -- --exit-zero-on-e2e-failure` → **run.mjs** + **`common/run-scope-beta.txt`** → Vercel 报告 → 飞书（**`E2E_BASE_URL`** 见本 job **`env`** / **`common/global-setup.ts`**）。
 # GitHub Actions 的 `schedule.cron` 一律按 UTC；`0 */6 * * *` = 每 6 小时整点一次（0、6、12、18 时 UTC 的 :00；东八区约 8:00、14:00、20:00、次日 2:00）。
 # 若单次 job 偶发超过定时间隔且 `cancel-in-progress: true`，下一触发可能取消上一跑；可改为 `false` 或再调稀 cron。
