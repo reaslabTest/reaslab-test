@@ -371,7 +371,7 @@ export async function reasLingoClickNewChatWhenIdle(page: Page): Promise<void> {
 }
 
 /**
- * 侧栏 **ReasLingo** 切回 **Default** Agent（**§7.5** / **§8.5** 等；**Optimization Agent** 触发器非 **`/^Agent$/`**）。
+ * 侧栏 **ReasLingo** 切回 **Default** Agent（**§7.4** / **§8.5** 等）。
  */
 export async function ensureReasLingoDefaultAgent(page: Page, host?: Locator): Promise<void> {
   const h = host ?? reasLingoInputHostLocator(page);
@@ -698,77 +698,6 @@ export async function reasLingoWhoAreYouProbe(
   return true;
 }
 
-/**
- * **`docs/用户场景.md` §9.4**：全屏 AI 会话。
- *
- * **当前 `reaslab-iipe`**：顶栏 **`Switch to Agent Mode`**（`menubar.tsx` **`ToggleAgentModeButton`**）→ 路由 **`/projects/:uuid/agent`**（**`IdeAgent`**）；
- * 含 **Search conversations…**、**MessageInput**、右侧 **Activity** Tab、**Switch to IDE Mode**（**`IdeAgentHeader`**）。
- *
- * **旧版（已移除）**：侧栏 **`title="Standalone Chat Mode"`** + Portal **`[data-standalone-chat]`**（**`StandaloneChatView`**）；若环境仍保留则走兼容分支。
- *
- * @returns 无入口或全屏页关键控件未就绪时 **`false`**（**`test.skip`**）。
- */
-export async function reasLingoStandaloneChatFullScreenProbe(page: Page): Promise<boolean> {
-  const projectMatch = page.url().match(/\/projects\/([^/]+)/);
-  if (!projectMatch) {
-    return false;
-  }
-
-  const legacyEnter = page.getByTitle("Standalone Chat Mode").first();
-  if ((await legacyEnter.count()) > 0 && (await legacyEnter.isVisible().catch(() => false))) {
-    await legacyEnter.click();
-    const shell = page.locator("[data-standalone-chat]").first();
-    try {
-      await expect(shell).toBeVisible({ timeout: 25_000 });
-      await expect(shell.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 15_000 });
-      await expect(
-        shell.getByTitle("Upload Files for AI Chat").or(shell.locator("textarea")).first(),
-      ).toBeVisible({ timeout: 15_000 });
-      await expect(shell.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-      await expect(shell.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  await ensureReasLingoVisible(page).catch(() => {});
-
-  const agentModeBtn = page
-    .locator("button")
-    .filter({ has: page.locator('img[alt="Agent Mode"]') })
-    .first();
-  if ((await agentModeBtn.count()) < 1 || !(await agentModeBtn.isVisible().catch(() => false))) {
-    return false;
-  }
-
-  await agentModeBtn.click();
-
-  const projectUuid = projectMatch[1];
-  try {
-    await expect(page).toHaveURL(new RegExp(`/projects/${projectUuid}/agent/?$`, "i"), {
-      timeout: 30_000,
-    });
-  } catch {
-    return false;
-  }
-
-  try {
-    await expect(page.getByPlaceholder("Search conversations...").first()).toBeVisible({
-      timeout: 25_000,
-    });
-    await expect(
-      page.getByTitle("Upload Files for AI Chat").or(page.getByRole("textbox")).first(),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTitle("Switch to IDE Mode").first()).toBeVisible({ timeout: 15_000 });
-  } catch {
-    return false;
-  }
-
-  return true;
-}
-
 /** `docs/用户场景.md` §8.5：MIL 入门 **Lean** 相对路径（与 **`S01_Getting_Started.lean`** 首行 **`#eval "Hello, World!"`** 一致）。 */
 export const MIL_S01_GETTING_STARTED_LEAN_REL = "MIL/C01_Introduction/S01_Getting_Started.lean" as const;
 
@@ -1009,7 +938,7 @@ export async function reasLingoDefaultAgentLakeMcpBuildProbe(page: Page): Promis
   return true;
 }
 
-/** §7.5：侧栏正文是否含 **python-execute / shell** 成功线索（与 **`reaslab-iipe` `skills.rs`** 一致，非 Console 专用文案）。 */
+/** §7.4：侧栏正文是否含 **python-execute / shell** 成功线索（与 **`reaslab-iipe` `skills.rs`** 一致，非 Console 专用文案）。 */
 export function reasLingoPythonExecuteSuccessInSidebarText(text: string, relPyPath: string): boolean {
   const t = text.replace(/\r\n/g, "\n");
   const base = relPyPath.replace(/^\/+/, "").split("/").pop() ?? relPyPath;
@@ -1037,7 +966,7 @@ export function reasLingoPythonExecuteSuccessInSidebarText(text: string, relPyPa
   return exitOk || toolPathOk || actionsToolOk;
 }
 
-/** §7.5：侧栏是否出现**助理侧**工具执行线索（勿仅匹配用户气泡里的 `python-execute` 字样）。 */
+/** §7.4：侧栏是否出现**助理侧**工具执行线索（勿仅匹配用户气泡里的 `python-execute` 字样）。 */
 export function reasLingoPythonExecuteToolStartedInSidebarText(text: string, relPyPath: string): boolean {
   const t = text.replace(/\r\n/g, "\n");
   const base = relPyPath.replace(/^\/+/, "").split("/").pop() ?? relPyPath;
@@ -1057,9 +986,9 @@ export function reasLingoPythonExecuteToolStartedInSidebarText(text: string, rel
 }
 
 /**
- * `docs/用户场景.md` §7.5：**第二次**跑与 **§7.4** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**）：
+ * `docs/用户场景.md` §7.4：**第二次**跑与 **§7.3** 相同的模板主 **`.py`**（路径 **`projectPyDataName`**）：
  * 侧栏 **ReasLingo**、**默认 Agent**、**New Chat** 后要求经 **`python-execute`**（shell 工具，见 **`reaslab-iipe` `skills.rs`**）全量执行；
- * 与 **§7.4** **Run Python → Console** 形成双路径验收。
+ * 与 **§7.3** **Run Python → Console** 形成双路径验收。
  */
 export async function reasLingoDefaultAgentMcpPythonProbe(
   page: Page,
@@ -1118,14 +1047,14 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
     });
     if (await toast.first().isVisible().catch(() => false)) {
       throw new Error(
-        `§7.5：ReasLingo 未发出用户消息（${base}）。侧栏 toast：${((await toast.first().innerText()) ?? "").slice(0, 300)}`,
+        `§7.4：ReasLingo 未发出用户消息（${base}）。侧栏 toast：${((await toast.first().innerText()) ?? "").slice(0, 300)}`,
       );
     }
     const stillWelcome = await shell.getByText(/Welcome to/i).isVisible().catch(() => false);
     throw new Error(
       stillWelcome
-        ? `§7.5：点击发送后仍为 WelcomeScreen，用户消息未进入 MessageList（可能 isLoading 仍为 true 或 ACP session 未创建）。探针：${base}`
-        : `§7.5：侧栏未出现含 ${base} 的用户消息。`,
+        ? `§7.4：点击发送后仍为 WelcomeScreen，用户消息未进入 MessageList（可能 isLoading 仍为 true 或 ACP session 未创建）。探针：${base}`
+        : `§7.4：侧栏未出现含 ${base} 的用户消息。`,
     );
   }
 
@@ -1144,16 +1073,16 @@ export async function reasLingoDefaultAgentMcpPythonProbe(
 
   const bodyFinal = (await shell.innerText()) ?? "";
   if (pythonHardFailure.test(bodyFinal)) {
-    throw new Error(`§7.5 python-execute 失败（侧栏含执行错误）。节选：${bodyFinal.slice(-2_500)}`);
+    throw new Error(`§7.4 python-execute 失败（侧栏含执行错误）。节选：${bodyFinal.slice(-2_500)}`);
   }
   if (!reasLingoPythonExecuteSuccessInSidebarText(bodyFinal, rel)) {
-    const stillOn73 =
+    const stillOnWhoAreYou =
       /who are you\?/i.test(bodyFinal) &&
       !new RegExp(`python-execute.*${baseEsc}`, "is").test(bodyFinal.replace(/\s+/g, " "));
     throw new Error(
-      stillOn73
-        ? "§7.5：侧栏仍为 §7.3「who are you?」会话，python-execute 探针未发出或未渲染；请确认 New Chat 与 Default Agent。"
-        : `§7.5：助理未执行 python-execute ${rel} 或未出现 exit_code 0 / Actions 线索。节选：${bodyFinal.slice(-2_500)}`,
+      stillOnWhoAreYou
+        ? "§7.4：侧栏仍为 who are you? 会话，python-execute 探针未发出或未渲染；请确认 New Chat 与 Default Agent。"
+        : `§7.4：助理未执行 python-execute ${rel} 或未出现 exit_code 0 / Actions 线索。节选：${bodyFinal.slice(-2_500)}`,
     );
   }
 }
@@ -1277,16 +1206,70 @@ export async function reasLingoDefaultAgentTexMcpCompileLogProbe(page: Page): Pr
     .toBeTruthy();
 }
 
-/** `docs/用户场景.md` §7.6：与文档一致的英文召回句（口语拼写）。 */
+/** `docs/用户场景.md` §7.5：与文档一致的英文召回句（口语拼写）。 */
 export const CH7_HISTORY_RECALL_PROMPT = "what question did I asked?";
 
-/** §7.6：串行主线在 **§7.3（切换Optimization Agent并提问）** 跳过等情况下历史不足两条时的 **`test.skip`** 说明。 */
+/** §7.4 → §7.5：在 **who are you?** 探针后重命名当前会话，供 **§7.5** 稳定选中（避免与 **python-execute** 或历史脏数据混淆）。 */
+export const CH7_WHO_ARE_YOU_SESSION_TAG = "CH7 who probe";
+
+function reasLingoIdeChatHistoryPopover(page: Page): Locator {
+  return page.locator("div").filter({ has: page.getByPlaceholder("Search...") }).filter({ visible: true }).first();
+}
+
+function reasLingoIdeChatHistorySessionRows(pop: Locator): Locator {
+  return pop.locator('div[role="button"][tabindex="0"]').filter({ hasText: /\d+\s+messages/i });
+}
+
+/** 侧栏 **Chat History** 浮层：将**当前（列表首条 / 最新）**会话重命名为 **`tag`**。 */
+export async function reasLingoTagCurrentSessionInHistoryPopover(page: Page, tag: string): Promise<void> {
+  const host = reasLingoInputHostLocator(page);
+  await host.getByTitle("Chat History").click();
+  const pop = reasLingoIdeChatHistoryPopover(page);
+  await expect(pop).toBeVisible({ timeout: 15_000 });
+  await expect(pop.getByText(/Loading chat history/i)).toBeHidden({ timeout: 120_000 });
+
+  const sessionRows = reasLingoIdeChatHistorySessionRows(pop);
+  await expect(sessionRows.first()).toBeVisible({ timeout: 15_000 });
+  const currentRow = sessionRows.first();
+
+  await currentRow.scrollIntoViewIfNeeded();
+  await currentRow.hover();
+  await currentRow.getByTitle("Rename").click();
+  const titleInput = currentRow.getByRole("textbox");
+  await expect(titleInput).toBeVisible({ timeout: 10_000 });
+  await titleInput.fill(tag);
+  await currentRow.getByTitle("Save").click();
+  const tagEsc = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await expect(sessionRows.filter({ hasText: new RegExp(tagEsc, "i") }).first()).toBeVisible({ timeout: 30_000 });
+  await page.keyboard.press("Escape");
+  await expect(pop).toBeHidden({ timeout: 10_000 });
+}
+
+function sidebarLooksLikeWhoAreYouSession(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  return /who are you\?/i.test(t) || /I[''\u2019]?m ReasLingo/i.test(t) || /ReasLingo.*assistant/i.test(t);
+}
+
+async function sidebarShowsWhoAreYouSessionLoaded(shell: Locator): Promise<boolean> {
+  if ((await shell.getByText(/who are you\?/i).count()) > 0) {
+    return true;
+  }
+  if ((await shell.getByText(/I[''\u2019]?m ReasLingo/i).count()) > 0) {
+    return true;
+  }
+  if ((await shell.getByText(/ReasLingo.*assistant/i).count()) > 0) {
+    return true;
+  }
+  return sidebarLooksLikeWhoAreYouSession((await shell.innerText()) ?? "");
+}
+
+/** §7.5：串行主线历史不足两条时的 **`test.skip`** 说明。 */
 export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
-  "§7.6 需要至少 2 条 ReasLingo 历史会话（主线含 §7.3「切换Optimization Agent并提问」与 §7.5 python-execute）；当前列表不足。";
+  "§7.5 需要至少 2 条 ReasLingo 历史会话（主线含 §7.4 who are you? 与 python-execute）；当前列表不足。";
 
 /**
- * **`docs/用户场景.md` §7.6**：**Chat History** → 列表滚到底 → 点**最后一条会话** → 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
- * 流结束后侧栏正文含 **`who are you`**（与 **§7.3（切换Optimization Agent并提问）** 用户消息对齐）。
+ * **`docs/用户场景.md` §7.5**：**Chat History** → 选择 **§7.4** 打标会话 **`CH7_WHO_ARE_YOU_SESSION_TAG`**（无标签时回退 **who are you** 标题 / 最下一条）→ 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
+ * 流结束后侧栏正文含 **`who are you`**（与 **§7.4** 默认 Agent **who are you?** 对齐）。
  *
  * **会话行定位**：`reaslab-iipe` **`SessionItem`** 为 **`div role="button"`**（标题 + **`N messages`**）；行内另有 Rename/Delete 等原生 **`<button>`**，
  * 须用 **`div[role="button"][tabindex="0"]` + `hasText(/\d+\s+messages/)`**，避免把操作钮算进会话数。
@@ -1295,21 +1278,20 @@ export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
  */
 export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou(page: Page): Promise<boolean> {
   await ensureReasLingoVisible(page);
+  const shell = reasLingoSidebarShellLocator(page);
   const host = reasLingoInputHostLocator(page);
+  await expect(shell).toBeVisible({ timeout: 20_000 });
   await expect(host).toBeVisible({ timeout: 20_000 });
 
-  const chatHistoryPopover = () =>
-    page.locator("div").filter({ has: page.getByPlaceholder("Search...") }).filter({ visible: true }).first();
-
-  await test.step("§7.6-1：Chat History → 等待列表加载", async () => {
+  await test.step("§7.5-1：Chat History → 等待列表加载", async () => {
     await host.getByTitle("Chat History").click();
-    const pop = chatHistoryPopover();
+    const pop = reasLingoIdeChatHistoryPopover(page);
     await expect(pop).toBeVisible({ timeout: 15_000 });
     await expect(pop.getByText(/Loading chat history/i)).toBeHidden({ timeout: 120_000 });
   });
 
-  const pop = chatHistoryPopover();
-  const sessionRows = pop.locator('div[role="button"][tabindex="0"]').filter({ hasText: /\d+\s+messages/i });
+  const pop = reasLingoIdeChatHistoryPopover(page);
+  const sessionRows = reasLingoIdeChatHistorySessionRows(pop);
 
   try {
     await expect
@@ -1326,20 +1308,41 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
     return false;
   }
 
-  await test.step("§7.6-2：滚到底并选择最下一条会话", async () => {
-    const scrollArea = pop.locator(".max-h-80.overflow-y-auto").first();
-    await scrollArea.evaluate((el: HTMLElement) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    // 同步 `scrollTop` 后立刻点最后一条时，偶发未触发「选中会话」→ 浮层不自动关；略等滚动/布局稳定再点。
-    await page.waitForTimeout(1_000);
-    const lastSession = sessionRows.nth(n - 1);
-    await lastSession.scrollIntoViewIfNeeded();
-    await lastSession.click();
+  await test.step(`§7.5-2：选择「${CH7_WHO_ARE_YOU_SESSION_TAG}」会话并验收已加载`, async () => {
+    const tagEsc = CH7_WHO_ARE_YOU_SESSION_TAG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let target = sessionRows.filter({ hasText: new RegExp(tagEsc, "i") }).first();
+    if ((await target.count()) < 1) {
+      target = sessionRows.filter({ hasText: /who are you/i }).last();
+    }
+
+    if ((await target.count()) < 1) {
+      const scrollArea = pop.locator(".max-h-80.overflow-y-auto").first();
+      await scrollArea.evaluate((el: HTMLElement) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.waitForTimeout(1_000);
+      target = sessionRows.nth(n - 1);
+    }
+
+    await target.scrollIntoViewIfNeeded();
+    await target.click();
     await expect(pop).toBeHidden({ timeout: 15_000 });
+
+    /** 等待会话消息加载（`selectSession` 异步拉取历史页）。 */
+    const welcome = shell.getByText(/Welcome to/i).first();
+    if (await welcome.isVisible().catch(() => false)) {
+      await expect(welcome).toBeHidden({ timeout: 30_000 });
+    }
+
+    await expect
+      .poll(async () => sidebarShowsWhoAreYouSessionLoaded(shell), {
+        timeout: 60_000,
+        intervals: [400, 800, 1_600, 3_200],
+      })
+      .toBeTruthy();
   });
 
-  await test.step(`§7.6-3：发送「${CH7_HISTORY_RECALL_PROMPT}」并等待流式结束`, async () => {
+  await test.step(`§7.5-3：发送「${CH7_HISTORY_RECALL_PROMPT}」并等待流式结束`, async () => {
     const ta = reasLingoPromptInput(host);
     await expect(ta).toBeVisible({ timeout: 15_000 });
     await ta.click();
@@ -1349,14 +1352,22 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
     await sendBtn.click();
     await expect(async () => {
       await expect(page).toHaveURL(/\/projects\/[^/]+/i);
-      await expect(host.getByText(/what question did I asked\?/i).first()).toBeVisible();
+      await expect(shell.getByText(/what question did I asked\?/i).first()).toBeVisible();
     }).toPass({ timeout: 60_000 });
     await waitForReasLingoAssistantReplyDone(page);
   });
 
-  await test.step("§7.6-4：验收助理正文含 who are you（与 §7.3 切换Optimization Agent并提问 一致）", async () => {
+  await test.step("§7.5-4：验收侧栏含 who are you（历史或助理召回）", async () => {
     await expect
-      .poll(async () => /who\s+are\s+you/i.test((await host.innerText()) ?? ""), {
+      .poll(async () => {
+        const t = (await shell.innerText()) ?? "";
+        return (
+          /who\s+are\s+you/i.test(t) ||
+          /I[''\u2019]?m ReasLingo/i.test(t) ||
+          /ReasLingo.*assistant/i.test(t) ||
+          /you asked.*who/i.test(t)
+        );
+      }, {
         timeout: 120_000,
         intervals: [500, 1_500, 3_000],
       })
@@ -1366,11 +1377,11 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
   return true;
 }
 
-/** `docs/用户场景.md` §7.7：**Models** 中未找到 **SiliconFlow** 或未展开时的 **`test.skip`** 说明。 */
+/** `docs/用户场景.md` §7.6：**Models** 中未找到 **SiliconFlow** 或未展开时的 **`test.skip`** 说明。 */
 export const MODELING_CH7_SETTINGS_SILICONFLOW_SKIP_MSG =
-  "§7.7：ReasLingo Settings → Models 在加载完成或列表渲染后仍无可点的 SiliconFlow（或未展示该 Provider），跳过。";
+  "§7.6：ReasLingo Settings → Models 在加载完成或列表渲染后仍无可点的 SiliconFlow（或未展示该 Provider），跳过。";
 
-/** 与 **`docs/用户场景.md`** §7.7 步骤 3 一致（产品内展示文案）。 */
+/** 与 **`docs/用户场景.md`** §7.6 步骤 3 一致（产品内展示文案）。 */
 export const CH7_SETTINGS_USER_RULE_TEXT = "Always response in English";
 
 /**
@@ -1407,7 +1418,7 @@ export async function reasLingoCloseIdeAiSettingsTab(page: Page): Promise<void> 
 }
 
 /**
- * **`docs/用户场景.md` §7.7**：**Models**（SiliconFlow、**`test`** 占位模型）→ **User Rules** → **Tools**（**Semantic Scholar** API Key 区块）→
+ * **`docs/用户场景.md` §7.6**：**Models**（SiliconFlow、**`test`** 占位模型）→ **User Rules** → **Tools**（**Semantic Scholar** API Key 区块）→
  * 关闭设置；侧栏 **Switch Model** 列表中可见 **`test`**。
  *
  * @returns **`false`** 仅当找不到 **SiliconFlow** 展开行（调用方 **`test.skip`**）；其余步骤失败时 **抛出**。
@@ -1437,7 +1448,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     return false;
   }
 
-  await test.step("§7.7-2 Models：SiliconFlow → Add Model → test / test → Save", async () => {
+  await test.step("§7.6-2 Models：SiliconFlow → Add Model → test / test → Save", async () => {
     await sfTrigger.click();
 
     /**
@@ -1487,7 +1498,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     await expect(siliconCollapsible.getByPlaceholder("e.g. deepseek-chat")).toBeHidden({ timeout: 120_000 });
   });
 
-  await test.step("§7.7-3 User Rules：+ Add Rule → Always response in English → Save", async () => {
+  await test.step("§7.6-3 User Rules：+ Add Rule → Always response in English → Save", async () => {
     await innerTabs.getByRole("tab", { name: "User Rules", exact: true }).click();
     const userPanel = page.getByRole("tabpanel", { name: "User Rules", exact: true });
     await expect(userPanel).toBeVisible({ timeout: 15_000 });
@@ -1505,7 +1516,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     });
   });
 
-  await test.step("§7.7-4 Tools：Semantic Scholar API key 区块", async () => {
+  await test.step("§7.6-4 Tools：Semantic Scholar API key 区块", async () => {
     await innerTabs.getByRole("tab", { name: "Tools", exact: true }).click();
     const toolsPanel = page.getByRole("tabpanel", { name: "Tools", exact: true });
     await expect(toolsPanel).toBeVisible({ timeout: 15_000 });
@@ -1524,7 +1535,7 @@ export async function reasLingoIdeSettingsAiFlow(page: Page): Promise<boolean> {
     });
   });
 
-  await test.step("§7.7-5 关闭设置；侧栏 Switch Model 列表含 test", async () => {
+  await test.step("§7.6-5 关闭设置；侧栏 Switch Model 列表含 test", async () => {
     await reasLingoCloseIdeAiSettingsTab(page);
 
     const host = reasLingoInputHostLocator(page);
@@ -1558,17 +1569,13 @@ export const MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG =
 export const MODELING_CH7_SKIP_MSG =
   "无法从优化建模模板进入数学建模 IDE：请确认已登录、模板服务可用，或 test/data/.e2e-artifacts/optimization-template-project-uuid.txt 仍有效。";
 
-/** `docs/用户场景.md` §7.4：Console 出现 Gurobi / 许可证类错误时的 **`test.skip`** 说明（需 Solver Settings 或环境许可）。 */
+/** `docs/用户场景.md` §7.3：Console 出现 Gurobi / 许可证类错误时的 **`test.skip`** 说明（需 Solver Settings 或环境许可）。 */
 export const MODELING_PYTHON_CONSOLE_GUROBI_SKIP_MSG =
-  "Console 出现 Gurobi/许可证类错误：请在侧栏 Solver Settings 配置 Gurobi WLS 并 Test/Save，或为 CI 注入许可；见 docs/用户场景.md §7.4。";
+  "Console 出现 Gurobi/许可证类错误：请在侧栏 Solver Settings 配置 Gurobi WLS 并 Test/Save，或为 CI 注入许可；见 docs/用户场景.md §7.3。";
 
 /** `docs/用户场景.md` §9「模板创建竞赛建模项目」：从「Math Modeling Contest Templates」创建项目失败时的跳过说明。 */
 export const MODELING_CH9_SKIP_MSG =
   "无法从数学建模竞赛模板进入建模 IDE：请确认已登录、竞赛模板服务可用，或 test/data/.e2e-artifacts/modeling-contest-template-project-uuid.txt 仍有效。";
-
-/** `docs/用户场景.md` §9.4：未进入 **Agent Mode**（`/projects/:uuid/agent`）或 **IdeAgent** 关键控件未就绪时的 **`test.skip`** 说明。 */
-export const MODELING_CH9_STANDALONE_CHAT_SKIP_MSG =
-  "§9.4 全屏 AI 会话：顶栏未找到 **Agent Mode** 入口、或未进入 `/projects/:uuid/agent`（IdeAgent）；窄屏下侧栏可能折叠，请用桌面宽度（≥1280）重跑。";
 
 /** `docs/用户场景.md` §8「模板创建定理证明项目」：MIL 定理证明模板 IDE 不可用时的跳过说明（与 `tryEnterLeanProjectIde` / `theorem-project-uuid.txt` 一致）。 */
 export const THEOREM_CH8_SKIP_MSG =
@@ -1951,7 +1958,7 @@ export function visibleCmContentInActiveEditor(page: Page): Locator {
 }
 
 /**
- * **`docs/用户场景.md`** §7.4：在 **Explore** 中打开文件树里 **第一个** accessible name 以 **`.py`** 结尾的 **row**。
+ * **`docs/用户场景.md`** §7.3：在 **Explore** 中打开文件树里 **第一个** accessible name 以 **`.py`** 结尾的 **row**。
  */
 export async function openFirstPythonFileRowInFileTree(page: Page): Promise<void> {
   const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
@@ -1962,7 +1969,7 @@ export async function openFirstPythonFileRowInFileTree(page: Page): Promise<void
 }
 
 /**
- * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.5** **python-execute** 与 **§7.4** 指向同一脚本。
+ * 与 **`openFirstPythonFileRowInFileTree`** 同一行：首个 **`.py`** 节点上 **`span[data-name]`** 的工程内路径（如 **`/main.py`**），供 **§7.4** **python-execute** 与 **§7.3** 指向同一脚本。
  */
 export async function readFirstPythonDataNameFromIdeFileTree(page: Page): Promise<string> {
   const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
@@ -2010,7 +2017,7 @@ export async function clickEditorToolbarRunPython(page: Page): Promise<void> {
   await runBtn.click();
 }
 
-/** §7.4：Console 以 **exit code** 断言；非 0 且 Gurobi/许可证 stderr 时返回 **`gurobi_license_skip`**（用例 **`test.skip`**）。 */
+/** §7.3：Console 以 **exit code** 断言；非 0 且 Gurobi/许可证 stderr 时返回 **`gurobi_license_skip`**（用例 **`test.skip`**）。 */
 export type PythonTemplateConsoleOutcome = "ok" | "gurobi_license_skip";
 
 /**

@@ -1,5 +1,5 @@
 /**
- * **`docs/用户场景.md`** §7：**7.1～7.7** E2E（含 **§7.7** **`ReasLingo` → Settings** 与 **`reasLingoIdeSettingsAiFlow`**）。
+ * **`docs/用户场景.md`** §7：**7.1～7.6** E2E（**7.4** 内 who are you 打标 + python-execute，供 **7.5** 切换历史）。
  */
 import { expect, test } from "@playwright/test";
 
@@ -14,10 +14,12 @@ import {
   openLeafFile,
   readFirstPythonDataNameFromIdeFileTree,
   ensureReasLingoVisible,
+  CH7_WHO_ARE_YOU_SESSION_TAG,
   reasLingoClickNewChatWhenIdle,
   reasLingoDefaultAgentMcpPythonProbe,
   reasLingoIdeSettingsAiFlow,
   reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou,
+  reasLingoTagCurrentSessionInHistoryPopover,
   reasLingoWhoAreYouProbe,
   tryEnterOptimizationTemplateModelingIde,
   visibleCmContentInActiveEditor,
@@ -86,19 +88,10 @@ test.describe("7. 模板创建优化建模项目", () => {
       .toBeGreaterThan(5);
   });
 
-  test("7.3 切换Optimization Agent并提问", async ({ page }) => {
-    test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
-    await ensureReasLingoVisible(page);
-    const ok = await reasLingoWhoAreYouProbe(page, /Optimization Agent/i);
-    test.skip(!ok, "当前环境无 Optimization Agent，跳过 7.3 切换Optimization Agent并提问。");
-    // §7.6 需 Chat History ≥2 条：7.3 结束后已 New Chat；7.5 探针内再 New Chat 后执行 python-execute。
-    await reasLingoClickNewChatWhenIdle(page);
-  });
-
   /**
-   * **`docs/用户场景.md`** §7.4：在已通过 **§7.1** 进入的优化建模模板项目中，打开主 **`.py`** → **Console** → **Run Python** → 断言 **Console** 绿区（步骤见 **`helpers.ts`**）。
+   * **`docs/用户场景.md`** §7.3：在已通过 **§7.1** 进入的优化建模模板项目中，打开主 **`.py`** → **Console** → **Run Python** → 断言 **Console** 绿区（步骤见 **`helpers.ts`**）。
    */
-  test("7.4 模板内 Python、Console 与 Run Python 验收", async ({ page }) => {
+  test("7.3 模板内 Python、Console 与 Run Python 验收", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
@@ -124,26 +117,25 @@ test.describe("7. 模板创建优化建模项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §7.5：与 **§7.4** 同一主脚本；**默认 Agent** + **New Chat** 下经 **`python-execute`** 再跑一遍
-   *（**第一次**为 **§7.4** **Run Python**；`describe` 串行）。
+   * **`docs/用户场景.md`** §7.4：与 **§7.3** 同一主脚本；**默认 Agent** + **New Chat** 下经 **`python-execute`** 再跑一遍。
+   * 开头先用默认 Agent 发送 **who are you?** 并 **New Chat**，为 **§7.5** 凑足 ≥2 条历史（原「切换 Optimization Agent」小节已移除）。
    */
-  test("7.5 调用python-execute", async ({ page }) => {
+  test("7.4 调用python-execute", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
+    await ensureReasLingoVisible(page);
+    await reasLingoWhoAreYouProbe(page, null);
+    await reasLingoTagCurrentSessionInHistoryPopover(page, CH7_WHO_ARE_YOU_SESSION_TAG);
+    await reasLingoClickNewChatWhenIdle(page);
     const pyDataName = await readFirstPythonDataNameFromIdeFileTree(page);
     await reasLingoDefaultAgentMcpPythonProbe(page, pyDataName);
   });
 
   /**
-   * **`docs/用户场景.md`** §7.6（步骤与 **`reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou`** 一致）：
-   * 1. **Chat History**：`title="Chat History"` → 等待非 **Loading chat history…**
-   * 2. 列表滚到底 → 点 **最后一条**会话（`≥2` 条；否则 **`test.skip`**）
-   * 3. 发送 **`what question did I asked?`** → `waitForReasLingoAssistantReplyDone`
-   * 4. 侧栏正文含 **`who are you`**（与 §7.3 切换Optimization Agent并提问 对齐）
-   *
-   * 依赖串行 **7.3**（结束后 **New Chat**）+ **7.5** 各产生一条会话。
+   * **`docs/用户场景.md`** §7.5（步骤与 **`reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou`** 一致）：
+   * 依赖串行 **7.4**（who are you + python-execute 各产生一条会话）。
    */
-  test("7.6 切换 AI 历史会话", async ({ page }) => {
+  test("7.5 切换 AI 历史会话", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     const ok = await reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYou(page);
@@ -151,10 +143,10 @@ test.describe("7. 模板创建优化建模项目", () => {
   });
 
   /**
-   * **`docs/用户场景.md`** §7.7：侧栏 **Settings** → **ReasLingo Settings** 虚拟 Tab → **Models** / **User Rules** / **Tools**；
+   * **`docs/用户场景.md`** §7.6：侧栏 **Settings** → **ReasLingo Settings** 虚拟 Tab → **Models** / **User Rules** / **Tools**；
    * 与 **`reasLingoIdeSettingsAiFlow`**（**`helpers.ts`**）步骤一致。
    */
-  test("7.7 设置 AI（齿轮：模型、用户规则、Tools & MCP）", async ({ page }) => {
+  test("7.6 设置 AI（齿轮：模型、用户规则、Tools & MCP）", async ({ page }) => {
     test.skip(!(await tryEnterOptimizationTemplateModelingIde(page)), MODELING_CH7_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
     const ok = await reasLingoIdeSettingsAiFlow(page);
