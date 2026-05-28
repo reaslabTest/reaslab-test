@@ -16,6 +16,8 @@ pnpm install
 
 所有命令均基于 **`common/playwright.config.ts`**（`testDir` 为仓库根；**`globalSetup`** 在跑用例前执行一次登录并写入 **`common/.auth/storage-state.json`**）。
 
+WSL 访问 beta 若出现 **`ERR_CONNECTION_CLOSED`**，见 **`docs/本地E2E-reaslab-iipe.md`**（推荐 **`export E2E_BASE_URL=http://127.0.0.1:3000`** 联调 **`reaslab-iipe`** 本地前端）；导航已含 **`common/e2e-nav.ts`** 重试，本地非 CI 用例默认 **`retries: 1`**。
+
 约定：**无后缀** = 无头 Chromium；**`:headed`** = 有界面（等价于再给 Playwright 传 **`--headed`**）。
 
 ### 1）完整链路（Playwright → Vercel 报告 → 飞书）

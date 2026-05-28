@@ -35,6 +35,10 @@
     "test:14:headed": "playwright test --config common/playwright.config.ts test/14-browse-templates.test.ts --headed",
     "test:15": "playwright test --config common/playwright.config.ts test/15-reaslingo-home.test.ts",
     "test:15:headed": "playwright test --config common/playwright.config.ts test/15-reaslingo-home.test.ts --headed",
+    "test:15:local:headed": "E2E_BASE_URL=http://127.0.0.1:3000 playwright test --config common/playwright.config.ts test/15-reaslingo-home.test.ts --headed",
+    "test:16": "playwright test --config common/playwright.config.ts test/16-reasflow-copilot.test.ts",
+    "test:16:headed": "playwright test --config common/playwright.config.ts test/16-reasflow-copilot.test.ts --headed",
+    "test:16:local:headed": "E2E_BASE_URL=http://127.0.0.1:3000 playwright test --config common/playwright.config.ts test/16-reasflow-copilot.test.ts --headed",
 
     "reaslab-test": "node run.mjs --scope-file=common/run-scope-beta.txt",
 

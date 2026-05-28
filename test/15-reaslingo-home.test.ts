@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { gotoWithRetry } from "../common/e2e-nav";
 import { absUrl } from "../common/global-setup";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -14,22 +15,49 @@ const TEST_UPLOAD_PNG = path.join(REPO_ROOT, "test/data/test_upload.png");
  * 单文件调试：`pnpm run test:15:headed`
  */
 async function gotoMarketingHome(page: Page): Promise<void> {
-  let res = await page.goto(absUrl("/home"), { waitUntil: "domcontentloaded" });
+  let res = await gotoWithRetry(page, absUrl("/home"), { waitUntil: "domcontentloaded" });
   if (!res?.ok()) {
-    res = await page.goto(absUrl("/"), { waitUntil: "domcontentloaded" });
+    res = await gotoWithRetry(page, absUrl("/"), { waitUntil: "domcontentloaded" });
   }
   expect(res?.ok(), `首屏导航状态 ${res?.status()}`).toBeTruthy();
+}
+
+/**
+ * **`reaslab-iipe` `ide-agent.tsx`**：`IdeAgentWelcome` 仅在 **`messages.length === 0`** 时渲染；
+ * `/reaslingo` 进入全局工作区后常会**恢复上次会话**（侧栏已有历史条目），此时中间区为消息流而非欢迎页。
+ */
+async function ensureIdeAgentWelcomeScreen(page: Page): Promise<void> {
+  const welcomeBot = page.getByRole("img", { name: "ReasLingo AI Bot" });
+  if (await welcomeBot.isVisible().catch(() => false)) {
+    await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 15_000 });
+    return;
+  }
+  const newChat = page.getByTitle("New Chat").first();
+  await expect(newChat).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(async () => (await newChat.isDisabled().catch(() => true)) === false, {
+      timeout: 120_000,
+      intervals: [400, 800, 1_600],
+    })
+    .toBeTruthy();
+  await newChat.click();
+  await expect(welcomeBot).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 15_000 });
 }
 
 async function openGlobalReasLingoFromHome(page: Page): Promise<void> {
   await gotoMarketingHome(page);
   const link = page.locator("header").locator('a[href="/reaslingo"]').first();
   await expect(link).toBeVisible({ timeout: 60_000 });
-  await link.click();
-  await page.waitForURL(/\/reaslingo\/?$/i, { timeout: 120_000 });
-  await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 30_000 });
+  // 与 `header-nav` 一致；直接 `goto` 比 `click` 等待导航更抗 WSL/CF 瞬时断连（`reaslab-iipe` `app/home/header-nav.tsx`）。
+  await gotoWithRetry(page, absUrl("/reaslingo"), {
+    waitUntil: "domcontentloaded",
+    timeout: 120_000,
+  });
+  await expect(page.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 120_000 });
+  await expect(ideAgentHeader(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTitle("Send Message").first()).toBeVisible({ timeout: 30_000 });
+  await ensureIdeAgentWelcomeScreen(page);
   await ensureIdeAgentRightPanelOpen(page);
   await expect(page.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 }
@@ -113,8 +141,12 @@ function chatsLeftPanel(page: Page): Locator {
     .locator("xpath=ancestor::div[contains(@class,'flex-col')][1]");
 }
 
+/** 左栏会话行（`SessionItem`：`role=button` + MessageSquare 图标；勿用 `\\d+ messages` 过滤——重命名编辑态会隐藏 meta）。 */
 function chatSessionButtons(page: Page): Locator {
-  return chatsLeftPanel(page).getByRole("button").filter({ hasText: /\d+\s+messages?/ });
+  return chatsLeftPanel(page)
+    .locator("div.min-h-0.flex-1.overflow-y-auto")
+    .getByRole("button")
+    .filter({ has: page.locator("svg.lucide-message-square") });
 }
 
 async function createTreeNode(page: Page, title: "Create New File" | "Create new folder", name: string): Promise<void> {
@@ -265,8 +297,8 @@ async function ideAgentSendUserMessage(page: Page, text: string, echoToken?: str
 
 function chatSessionByTitle(page: Page, title: string): Locator {
   const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return page.getByRole("button", {
-    name: new RegExp(`^${escaped}\\s+\\d+\\s+messages?$`),
+  return chatSessionButtons(page).filter({
+    has: page.getByText(new RegExp(`^${escaped}$`)),
   });
 }
 
@@ -274,46 +306,81 @@ function normalizeSessionRowText(text: string | null): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
-async function snapshotChatSessionRows(page: Page): Promise<Set<string>> {
+type ChatSessionsSnapshot = {
+  /** 各行 `innerText` 归一化后集合（重复标题会折叠，勿单独用于判断「是否新增」）。 */
+  rowTexts: Set<string>;
+  /** `chatSessionButtons` 数量（发消息前应记录）。 */
+  buttonCount: number;
+};
+
+async function snapshotChatSessions(page: Page): Promise<ChatSessionsSnapshot> {
   const buttons = chatSessionButtons(page);
   const n = await buttons.count();
-  const rows = new Set<string>();
+  const rowTexts = new Set<string>();
   for (let i = 0; i < n; i++) {
-    rows.add(normalizeSessionRowText(await buttons.nth(i).innerText()));
+    rowTexts.add(normalizeSessionRowText(await buttons.nth(i).innerText()));
   }
-  return rows;
+  return { rowTexts, buttonCount: n };
 }
 
-/** 发消息后 sidebar 不一定给 active 行加 `ring-primary`；用列表 diff 定位新会话行。 */
-async function findNewChatSession(page: Page, beforeRows: Set<string>): Promise<Locator> {
+function chatSessionsLoadingIndicator(page: Page): Locator {
+  return chatsLeftPanel(page).getByText("Loading...", { exact: true });
+}
+
+/** `useChatSessions` 在 `refetchSessions` 时会短暂替换列表为 Loading…，须等其结束再点选行。 */
+async function waitForChatSessionsListReady(page: Page, timeoutMs = 120_000): Promise<void> {
+  await ensureChatsLeftPanelOpen(page);
+  await expect(chatSessionsLoadingIndicator(page)).toBeHidden({ timeout: timeoutMs });
+}
+
+/** 当前选中会话（`SessionItem` **`isActive`** → **`ring-1 ring-primary/20`**）。 */
+function activeChatSessionButton(page: Page): Locator {
+  return chatSessionButtons(page).filter({ has: page.locator('[class*="ring-primary"]') }).first();
+}
+
+/**
+ * 发消息后定位待重命名会话：等列表非 Loading 且条数增加；优先 **active** 行，其次文案 diff，最后 **首条**（与 `upsertSession` 置顶一致，应对多个 **New Chat · 1 messages** 文案相同）。
+ */
+async function findChatSessionAfterSend(page: Page, before: ChatSessionsSnapshot): Promise<Locator> {
   let found: Locator | undefined;
   await expect
-    .poll(async () => {
-      const buttons = chatSessionButtons(page);
-      const n = await buttons.count();
-      for (let i = 0; i < n; i++) {
-        const row = normalizeSessionRowText(await buttons.nth(i).innerText());
-        if (!beforeRows.has(row)) {
-          found = buttons.nth(i);
+    .poll(
+      async () => {
+        if (await chatSessionsLoadingIndicator(page).isVisible().catch(() => false)) {
+          return false;
+        }
+        const buttons = chatSessionButtons(page);
+        const n = await buttons.count();
+        if (n <= before.buttonCount) {
+          return false;
+        }
+        const active = activeChatSessionButton(page);
+        if ((await active.count()) > 0) {
+          found = active;
           return true;
         }
-      }
-      return false;
-    }, { timeout: 60_000 })
+        for (let i = 0; i < n; i++) {
+          const row = normalizeSessionRowText(await buttons.nth(i).innerText());
+          if (!before.rowTexts.has(row)) {
+            found = buttons.nth(i);
+            return true;
+          }
+        }
+        found = buttons.first();
+        return true;
+      },
+      { timeout: 120_000, intervals: [250, 500, 1_000, 2_000] },
+    )
     .toBe(true);
   return found!;
 }
 
 async function renameChatSession(page: Page, session: Locator, newTitle: string): Promise<void> {
-  await session.scrollIntoViewIfNeeded();
-  await session.hover();
-  if (!(await session.getByRole("textbox").isVisible().catch(() => false))) {
-    await session.getByTitle("Rename").click();
-  }
-  const titleInput = session.getByRole("textbox");
+  await clickChatSessionRowAction(page, session, "Rename");
+  // `SessionItem.tsx` 编辑态为 `<input type="text">`；须限定在当前行内（勿用全局 textbox）。
+  const titleInput = session.locator('input[type="text"]');
   await expect(titleInput).toBeVisible({ timeout: 10_000 });
   await titleInput.fill(newTitle);
-  // 输入框在 role=button 会话行内，Enter 易冒泡；与 SessionItem 的 Save 一致。
   await session.getByTitle("Save").click();
   await expect(chatSessionByTitle(page, newTitle)).toBeVisible({ timeout: 30_000 });
 }
@@ -326,7 +393,7 @@ function noMatchingConversations(page: Page): Locator {
   return chatsLeftPanel(page).getByText("No matching conversations", { exact: true });
 }
 
-/** Share 会 `openTab(reaslingo://share)` 并收起左栏；须点 **Cancel** 关闭 Share Chat Tab（Escape 无效）。 */
+/** Share 会 `openTab(reaslingo://share)` 并 **`closeLeftPanel`** 收起左栏；须点 **Cancel** 关闭 Share Chat Tab（Escape 无效）。 */
 async function closeShareChatPanel(page: Page): Promise<void> {
   const shareRecipients = page.getByPlaceholder("Search recipients...");
   if (!(await shareRecipients.isVisible({ timeout: 10_000 }).catch(() => false))) {
@@ -340,14 +407,57 @@ async function closeShareChatPanel(page: Page): Promise<void> {
   await expect(shareRecipients).toBeHidden({ timeout: 15_000 });
 }
 
-/** Share 会收起左栏；中间顶栏出现 **Toggle Sidebar** 表示左栏已关（搜索框仍在 DOM 内，勿用其 isVisible 判断）。 */
+/** 左栏 **Search conversations…** 输入框有足够宽度（`ResizablePanel` 已展开，非 `collapsedSize=0` 叠在中间区下）。 */
+async function isChatsLeftPanelExpanded(page: Page): Promise<boolean> {
+  const box = await chatSessionSearchInput(page).boundingBox();
+  return box !== null && box.width >= 120;
+}
+
+/**
+ * **`ide-agent/left-panel.tsx`**：Share 调 **`onClose()`** → **`closeLeftPanel`**；中间顶栏 **Toggle Sidebar** 可再展开。
+ * 勿仅用 **Chats** 文案可见——折叠态节点仍在 DOM，hover 会被 **`ide-agent-chat`** 遮挡。
+ */
 async function ensureChatsLeftPanelOpen(page: Page): Promise<void> {
-  const sidebarToggle = ideAgentHeader(page).getByTitle("Toggle Sidebar");
-  if (await sidebarToggle.isVisible().catch(() => false)) {
-    await sidebarToggle.click();
-  }
+  await expect
+    .poll(
+      async () => {
+        if (await isChatsLeftPanelExpanded(page)) {
+          return "open";
+        }
+        const sidebarToggle = ideAgentHeader(page).getByTitle("Toggle Sidebar");
+        if (await sidebarToggle.isVisible().catch(() => false)) {
+          await sidebarToggle.click();
+        }
+        return "pending";
+      },
+      { timeout: 45_000, intervals: [350, 500, 800, 1_200] },
+    )
+    .toBe("open");
   await expect(chatsLeftPanel(page).getByText("Chats", { exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(chatSessionSearchInput(page)).toBeVisible({ timeout: 15_000 });
+}
+
+/** `SessionItem` 行内操作钮为 **`group-hover:flex`**；须先保证左栏已展开再 hover。 */
+async function clickChatSessionRowAction(
+  page: Page,
+  session: Locator,
+  actionTitle: "Rename" | "Delete session" | "Send copy to collaborators",
+): Promise<void> {
+  await ensureChatsLeftPanelOpen(page);
+  await session.scrollIntoViewIfNeeded();
+  await session.hover({ timeout: 20_000 });
+  const action = session.getByTitle(actionTitle);
+  await expect(action).toBeVisible({ timeout: 10_000 });
+  await action.click();
+}
+
+async function confirmDeleteChatSessionDialog(page: Page): Promise<void> {
+  const deleteDialog = page.locator('[data-slot="alert-dialog-content"]').filter({
+    hasText: /Delete chat session/i,
+  });
+  if (await deleteDialog.isVisible().catch(() => false)) {
+    await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(deleteDialog).toBeHidden({ timeout: 15_000 });
+  }
 }
 
 /** §15.4：优先切到其它历史会话；若无则 **New Chat**（不再向 AI 提问）。 */
@@ -448,17 +558,15 @@ test.describe("15. 首页顶栏 ReasLingo", () => {
 
     await openGlobalReasLingoFromHome(page);
 
-    const beforeSessionRows = await snapshotChatSessionRows(page);
-    const baselineSessionCount = beforeSessionRows.size;
+    await ensureChatsLeftPanelOpen(page);
+    const beforeSessions = await snapshotChatSessions(page);
 
     await chatsLeftPanel(page).getByTitle("New Chat").click();
-    await expect(page.getByText(/Welcome to\s+ReasLingo chat mode/i)).toBeVisible({ timeout: 30_000 });
+    await ensureIdeAgentWelcomeScreen(page);
 
     await ideAgentSendUserMessage(page, sessionMsgA, sessionTokenA);
-    await expect
-      .poll(async () => await chatSessionButtons(page).count(), { timeout: 60_000 })
-      .toBeGreaterThan(baselineSessionCount);
-    await renameChatSession(page, await findNewChatSession(page, beforeSessionRows), sessionTitleA);
+    await waitForChatSessionsListReady(page);
+    await renameChatSession(page, await findChatSessionAfterSend(page, beforeSessions), sessionTitleA);
     await chatSessionSearchInput(page).fill("");
 
     await switchAwayFromSession(page, sessionTitleA);
@@ -473,17 +581,15 @@ test.describe("15. 首页顶栏 ReasLingo", () => {
     await chatSessionSearchInput(page).fill("");
 
     const targetSession = chatSessionByTitle(page, sessionTitleA);
-    await targetSession.hover();
-    await targetSession.getByTitle("Send copy to collaborators").click();
+    await clickChatSessionRowAction(page, targetSession, "Send copy to collaborators");
     await expect(page.getByPlaceholder("Search recipients...")).toBeVisible({ timeout: 30_000 });
     await closeShareChatPanel(page);
 
-    await ensureChatsLeftPanelOpen(page);
     await chatSessionSearchInput(page).fill("");
     const sessionToDelete = chatSessionByTitle(page, sessionTitleA);
     await expect(sessionToDelete).toBeVisible({ timeout: 15_000 });
-    await sessionToDelete.hover();
-    await sessionToDelete.getByTitle("Delete session").click();
+    await clickChatSessionRowAction(page, sessionToDelete, "Delete session");
+    await confirmDeleteChatSessionDialog(page);
     await expect(chatSessionByTitle(page, sessionTitleA)).toBeHidden({ timeout: 30_000 });
   });
 });

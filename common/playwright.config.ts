@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { defineConfig, devices, type PlaywrightTestOptions } from "@playwright/test";
 
-import { E2E_BASE_URL, E2E_WAF_BYPASS_CONTEXT } from "./global-setup";
+import { chromiumLaunchArgs, E2E_BASE_URL, E2E_WAF_BYPASS_CONTEXT } from "./global-setup";
 
 /**
  * E2E：`testDir` 为仓库根；用例与共享辅助在 **`test/`**（匹配 `test` 目录下全部 `*.test.ts`、`test/helpers.ts`）。无匹配时仍依赖 `passWithNoTests`。
@@ -14,23 +14,13 @@ const TEST_E2E_ROOT = path.join(COMMON_DIR, "..");
 /** 与 `global-setup.ts` 写入路径一致（`common/.auth/`）。 */
 const STORAGE_STATE_PATH = path.join(COMMON_DIR, ".auth", "storage-state.json");
 
-/** 与 global-setup 一致：Linux root 下 Chromium 须关闭沙箱。 */
-function chromiumArgsForPlatform(): string[] {
-  if (
-    process.platform === "linux" &&
-    typeof process.getuid === "function" &&
-    process.getuid() === 0
-  ) {
-    return ["--no-sandbox", "--disable-setuid-sandbox"];
-  }
-  return [];
-}
-
-const rootSandboxArgs = chromiumArgsForPlatform();
+const chromiumLaunchArgsList = chromiumLaunchArgs();
 const chromeProjectUse = {
   ...devices["Desktop Chrome"],
   ...E2E_WAF_BYPASS_CONTEXT,
-  ...(rootSandboxArgs.length > 0 ? { launchOptions: { args: rootSandboxArgs } } : {}),
+  ...(chromiumLaunchArgsList.length > 0
+    ? { launchOptions: { args: chromiumLaunchArgsList } }
+    : {}),
 } as unknown as PlaywrightTestOptions;
 
 export default defineConfig({
@@ -45,7 +35,8 @@ export default defineConfig({
   },
   fullyParallel: false,
   forbidOnly: false,
-  retries: 0,
+  /** 本地/WSL 对 beta 易遇瞬时断连；CI 托管 runner 保持 0，避免掩盖真实失败。 */
+  retries: process.env.GITHUB_ACTIONS ? 0 : 1,
   reporter: [
     /** GitHub Actions：在 workflow 摘要里生成用例级结果；与下方 `list` 互补。 */
     ...(process.env.GITHUB_ACTIONS ? ([["github"]] as const) : []),

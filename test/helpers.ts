@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
+import { gotoWithRetry } from "../common/e2e-nav";
 import { absUrl } from "../common/global-setup";
 import {
   readModelingContestTemplateProjectUuidArtifact,
@@ -14,13 +15,17 @@ import {
   writeOptimizationTemplateProjectUuidArtifact,
 } from "./data/e2e-optimization-template-project-artifact";
 import { readTheoremProjectUuidArtifact, writeTheoremProjectUuidArtifact } from "./data/e2e-theorem-project-artifact";
+import {
+  readReasFlowCopilotTheoremProjectUuidArtifact,
+  writeReasFlowCopilotTheoremProjectUuidArtifact,
+} from "./data/e2e-reasflow-copilot-theorem-project-artifact";
 
 /** 与前端 `Hotkey.OPEN_FILE_EXPLORER` / `OPEN_PROJECT_SEARCH`（`mod+shift+e` / `mod+shift+f`）一致；无头 Linux 用 Ctrl。 */
 const FILE_EXPLORER_HOTKEY = "Control+Shift+E";
 const PROJECT_SEARCH_HOTKEY = "Control+Shift+F";
 
 export async function navigateToHomeProjects(page: Page): Promise<void> {
-  await page.goto(absUrl("/"));
+  await gotoWithRetry(page, absUrl("/"), { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible({ timeout: 30_000 });
 }
 
@@ -696,6 +701,144 @@ export async function reasLingoWhoAreYouProbe(
   await waitForReasLingoStreamStarted(page);
   await waitForReasLingoAssistantReplyDone(page);
   return true;
+}
+
+/** §5 / §16：关闭模型菜单中的 **Auto**。 */
+export async function turnOffReasLingoAutoModel(page: Page, host?: Locator): Promise<void> {
+  const h = host ?? reasLingoInputHostLocator(page);
+  const modelBtn = h.getByTitle("Switch Model");
+  await modelBtn.click();
+  const panel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const autoSwitch = panel.getByRole("switch");
+  if (await autoSwitch.isChecked()) {
+    await autoSwitch.click();
+  }
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden({ timeout: 5_000 });
+}
+
+/**
+ * 在 **Switch Model** 菜单中关闭 **Auto** 并选中 **ReasProX** 或 **ReasPro**（优先 **ReasProX**）。
+ * @returns 选中成功为 **`true`**；列表中均无则为 **`false`**。
+ */
+export async function selectReasLingoReasProModel(page: Page, host?: Locator): Promise<boolean> {
+  const h = host ?? reasLingoInputHostLocator(page);
+  const modelBtn = h.getByTitle("Switch Model");
+  await modelBtn.click();
+  const panel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const autoSwitch = panel.getByRole("switch");
+  if (await autoSwitch.isChecked()) {
+    await autoSwitch.click();
+  }
+  for (const label of [/^ReasProX$/i, /^ReasPro$/i] as const) {
+    const item = panel.locator('[data-slot="dropdown-menu-item"]').filter({ hasText: label });
+    if ((await item.count()) > 0) {
+      await item.first().click();
+      try {
+        await expect(panel).toBeHidden({ timeout: 5_000 });
+      } catch {
+        await page.keyboard.press("Escape");
+      }
+      return true;
+    }
+  }
+  await page.keyboard.press("Escape");
+  return false;
+}
+
+/**
+ * 侧栏 **Agent** 菜单切换至 `agentMenuLabel` 首条匹配项。
+ * @returns 菜单无匹配项时 **`false`**。
+ */
+export async function switchReasLingoAgentByMenuLabel(
+  page: Page,
+  agentMenuLabel: RegExp,
+  host?: Locator,
+): Promise<boolean> {
+  const h = host ?? reasLingoInputHostLocator(page);
+  const trigger = h.getByRole("button", { name: /^Agent$/i }).or(h.locator('button[title="Switch Agent"]'));
+  await expect(trigger.first()).toBeVisible({ timeout: 15_000 });
+  await trigger.first().click();
+  const panel = page.locator('[data-slot="dropdown-menu-content"][class*="w-56"]');
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  const item = panel.locator('[data-slot="dropdown-menu-item"]').filter({ hasText: agentMenuLabel });
+  if ((await item.count()) < 1) {
+    await page.keyboard.press("Escape");
+    return false;
+  }
+  await item.first().click();
+  await expect(panel).toBeHidden({ timeout: 5_000 });
+  await page.waitForTimeout(2_000);
+  return true;
+}
+
+/** §16.3：侧栏是否含轻量写作大纲成功线索。 */
+export function reasLingoReasFlowWritingOutlineSuccess(text: string): boolean {
+  const t = text.replace(/\r\n/g, "\n");
+  const lower = t.toLowerCase();
+  const hasBullets =
+    /(^|\n)\s*[-*•]\s+\S/m.test(t) || /(^|\n)\s*\d+\.\s+\S/m.test(t) || lower.includes("•");
+  const sectionHits = [/introduction/i, /related work/i, /method/i, /background/i, /survey/i].filter((re) =>
+    re.test(t),
+  ).length;
+  return hasBullets && sectionHits >= 2 && t.trim().length > 80;
+}
+
+/**
+ * **`docs/用户场景.md` §16.2**：切换 **ReasFlow Copilot**、验收 placeholder / 隐藏 Default 专属控件、选 **ReasPro** 系模型并发送 **who are you?**。
+ * @returns Agent 菜单无匹配项时 **`false`**。
+ */
+export async function reasLingoReasFlowCopilotInputBarProbe(page: Page): Promise<boolean> {
+  await ensureReasLingoVisible(page);
+  const host = reasLingoInputHostLocator(page);
+  await expect(host).toBeVisible({ timeout: 20_000 });
+
+  await turnOffReasLingoAutoModel(page, host);
+  const switched = await switchReasLingoAgentByMenuLabel(page, REASFLOW_COPILOT_AGENT_MENU_LABEL, host);
+  if (!switched) {
+    return false;
+  }
+
+  await expect(host.locator('button[title="Switch Agent"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(host.getByTitle("Chain of Thought")).toHaveCount(0);
+  await expect(host.getByTitle("Web Search")).toHaveCount(0);
+  await expect(host.getByTitle("More Settings")).toHaveCount(0);
+
+  const ta = reasLingoPromptInput(host);
+  await expect(ta).toHaveAttribute("placeholder", REASFLOW_COPILOT_INPUT_PLACEHOLDER, { timeout: 10_000 });
+
+  const modelOk = await selectReasLingoReasProModel(page, host);
+  if (!modelOk) {
+    return false;
+  }
+
+  await ta.click();
+  await ta.fill("who are you?");
+  const sendBtn = host.getByTitle("Send Message").first();
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await sendBtn.click();
+  await waitForReasLingoStreamStarted(page);
+  await waitForReasLingoAssistantReplyDone(page);
+  return true;
+}
+
+/** 填写 prompt 并等待本轮流式结束。 */
+export async function sendReasLingoPromptAndWaitForReply(
+  page: Page,
+  host: Locator,
+  prompt: string,
+): Promise<void> {
+  const ta = reasLingoPromptInput(host);
+  await expect(ta).toBeVisible({ timeout: 15_000 });
+  await ta.click();
+  await ta.fill(prompt);
+  const sendBtn = host.getByTitle("Send Message").first();
+  await expect(sendBtn).toBeEnabled({ timeout: 180_000 });
+  await sendBtn.click();
+  await waitForReasLingoStreamStarted(page);
+  await waitForReasLingoAssistantReplyDone(page);
 }
 
 /** `docs/用户场景.md` §8.5：MIL 入门 **Lean** 相对路径（与 **`S01_Getting_Started.lean`** 首行 **`#eval "Hello, World!"`** 一致）。 */
@@ -1588,6 +1731,26 @@ export const REASFLOW_COPILOT_AGENT_MENU_LABEL = /ReasFlow Copilot|Paper Copilot
 export const THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG =
   "§8.4 切换 ReasFlow Copilot：侧栏 Agent 菜单无 **ReasFlow Copilot**（或旧版 **Paper Copilot**），跳过。";
 
+/** `docs/用户场景.md` §16：无法从 **Theorem Proving Templates** 进入 MIL 定理 IDE 时的 **`test.skip`** 说明。 */
+export const REASFLOW_CH16_SKIP_MSG =
+  "§16：无法从 Theorem Proving Templates 进入 MIL 定理证明 IDE；请确认已登录且模板可用（首次 lake 可能极慢），或 test/data/.e2e-artifacts/reasflow-copilot-theorem-project-uuid.txt 仍有效。";
+
+/** `docs/用户场景.md` §16：**ReasFlow Copilot** 菜单不可见时的 **`test.skip`** 说明。 */
+export const REASFLOW_CH16_AGENT_SKIP_MSG =
+  "§16：侧栏 Agent 菜单无 **ReasFlow Copilot**（或旧版 **Paper Copilot**），跳过。";
+
+/** `docs/用户场景.md` §16.2：**ReasPro** / **ReasProX** 均不可选时的 **`test.skip`** 说明。 */
+export const REASFLOW_CH16_MODEL_SKIP_MSG =
+  "§16.2：ReasFlow Copilot 须 **ReasPro** 或 **ReasProX**；当前模型列表中均不可选，跳过。";
+
+/** `paper-generation` 输入 placeholder（`builtin.rs` **ReasFlow Copilot**）。 */
+export const REASFLOW_COPILOT_INPUT_PLACEHOLDER =
+  "Research topic, outline, or what you want ReasFlow Copilot to help with";
+
+/** `docs/用户场景.md` §16.3：轻量科研写作探针（禁止全论文流水线 / PDF）。 */
+export const CH16_REASFLOW_WRITING_PROBE =
+  "Outline a 3-section structure for a short survey on gradient descent optimization. Reply in bullet points only. Do not invoke sub-agents or generate PDF." as const;
+
 /** `docs/用户场景.md` §8.5（读取 Getting Started Lean）：无法切回 **Default** 或 **read_file** 探针未命中时的 **`test.skip`** 说明。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
   "§8.5（读取 Getting Started Lean）须 **Default** Agent，且侧栏出现 **read_file** 与 **S01_Getting_Started.lean**、**#eval \"Hello, World!\"** 等成功线索。若无法切回 **Default** 或未读取/确认文件，跳过。";
@@ -1948,6 +2111,38 @@ export async function tryEnterLeanProjectIde(page: Page): Promise<boolean> {
   const m = page.url().match(/\/projects\/([^/]+)/i);
   if (m?.[1]) {
     writeTheoremProjectUuidArtifact(m[1]);
+  }
+  return true;
+}
+
+/** `docs/用户场景.md` §16.1：Theorem Proving Templates → MIL → IDE（独立 artifact，不依赖 §8）。 */
+export async function tryEnterReasFlowCopilotTheoremIde(page: Page): Promise<boolean> {
+  const openByUuid = async (uuid: string): Promise<boolean> => {
+    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
+    if (!res?.ok() && res?.status() !== 304) {
+      return false;
+    }
+    try {
+      await waitForFileTree(page);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const cached = readReasFlowCopilotTheoremProjectUuidArtifact();
+  if (cached && (await openByUuid(cached))) {
+    return true;
+  }
+
+  await navigateToHomeProjects(page);
+  const ok = await createTheoremProvingProjectFromMilTemplate(page);
+  if (!ok) {
+    return false;
+  }
+  const m = page.url().match(/\/projects\/([^/]+)/i);
+  if (m?.[1]) {
+    writeReasFlowCopilotTheoremProjectUuidArtifact(m[1]);
   }
   return true;
 }

@@ -1,7 +1,9 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { chromium, type FullConfig, type Page } from "@playwright/test";
+
+import { gotoWithRetry } from "./e2e-nav";
 
 /**
  * 被测前端 origin（与 `playwright.config` 根级 `baseURL` 同源）。
@@ -35,6 +37,16 @@ export const E2E_CF_TESTING_AUTH =
 export const E2E_BOT_USER_AGENT =
   process.env.E2E_USER_AGENT ?? "Internal-QA-Bot/1.0 (E2E-Automated-Runner)";
 
+/** **`reaslab-iipe` 本地 `pnpm dev`（默认 3000）** 等无需 Cloudflare Access 头。 */
+export function isLocalE2EOrigin(baseUrl: string = E2E_BASE_URL): boolean {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * P110 §5.5 等项目分享邀请的目标邮箱；流水线可用环境变量 **`E2E_SHARE_INVITE_EMAIL`** 覆盖。
  */
@@ -49,12 +61,14 @@ export const E2E_SIGNUP_INBOX_EMAIL =
   process.env.E2E_SIGNUP_INBOX_EMAIL?.trim() || "reaslabTest2@proton.me";
 
 /** 与 `playwright.config` 中各 project 的 `use` 保持一致，须与 global-setup 登录共用。 */
-export const E2E_WAF_BYPASS_CONTEXT = {
-  userAgent: E2E_BOT_USER_AGENT,
-  extraHTTPHeaders: {
-    "x-testing-auth": E2E_CF_TESTING_AUTH,
-  },
-} as const;
+export const E2E_WAF_BYPASS_CONTEXT = isLocalE2EOrigin()
+  ? { userAgent: E2E_BOT_USER_AGENT }
+  : {
+      userAgent: E2E_BOT_USER_AGENT,
+      extraHTTPHeaders: {
+        "x-testing-auth": E2E_CF_TESTING_AUTH,
+      },
+    };
 
 /**
  * 拼绝对 URL：部分环境下 Playwright `use.baseURL` 未进 worker，`page.goto("/")` 会报 invalid URL。
@@ -83,16 +97,19 @@ const NAV_TIMEOUT_MS = 60_000;
 const ACTION_TIMEOUT_MS = 60_000;
 const POST_LOGIN_SHELL_MS = 60_000;
 
-/** Linux 下以 root 跑 Chromium 时默认沙箱不可用，必须关闭沙箱，否则常见白屏/脚本不执行、#Email 永不出现。 */
-function chromiumArgsForPlatform(): string[] {
-  if (
-    process.platform === "linux" &&
-    typeof process.getuid === "function" &&
-    process.getuid() === 0
-  ) {
-    return ["--no-sandbox", "--disable-setuid-sandbox"];
+/**
+ * Linux Chromium 启动参数：root 关沙箱；WSL 等环境常仅有 AAAA、IPv6 不可达，会致 `page.goto` 长时间 `ERR_TIMED_OUT`。
+ * 与 `playwright.config.ts` 的 project `launchOptions.args` 须一致。
+ */
+export function chromiumLaunchArgs(): string[] {
+  if (process.platform !== "linux") {
+    return [];
   }
-  return [];
+  const args = ["--disable-ipv6"];
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    args.push("--no-sandbox", "--disable-setuid-sandbox");
+  }
+  return args;
 }
 
 /** 与 `playwright test --headed` 一致时由 Playwright 传入 `--headed`（见 argv）。 */
@@ -119,14 +136,14 @@ async function loginAndSaveState(): Promise<void> {
 
   const browser = await chromium.launch({
     headless: !wantHeadedBrowser(),
-    args: chromiumArgsForPlatform(),
+    args: chromiumLaunchArgs(),
   });
   const context = await browser.newContext({ ...E2E_WAF_BYPASS_CONTEXT });
   const page = await context.newPage();
   page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
 
-  await page.goto(absUrl("/unauthenticated/login"), {
+  await gotoWithRetry(page, absUrl("/unauthenticated/login"), {
     waitUntil: "domcontentloaded",
     timeout: NAV_TIMEOUT_MS,
   });
