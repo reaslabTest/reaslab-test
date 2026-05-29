@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
 import { gotoWithRetry } from "../common/e2e-nav";
@@ -7,6 +9,7 @@ import {
   writeModelingContestTemplateProjectUuidArtifact,
 } from "./data/e2e-modeling-contest-template-project-artifact";
 import {
+  clearModelingProjectUuidArtifact,
   readModelingProjectUuidArtifact,
   writeModelingProjectUuidArtifact,
 } from "./data/e2e-modeling-project-artifact";
@@ -15,10 +18,6 @@ import {
   writeOptimizationTemplateProjectUuidArtifact,
 } from "./data/e2e-optimization-template-project-artifact";
 import { readTheoremProjectUuidArtifact, writeTheoremProjectUuidArtifact } from "./data/e2e-theorem-project-artifact";
-import {
-  readReasFlowCopilotTheoremProjectUuidArtifact,
-  writeReasFlowCopilotTheoremProjectUuidArtifact,
-} from "./data/e2e-reasflow-copilot-theorem-project-artifact";
 
 /** 与前端 `Hotkey.OPEN_FILE_EXPLORER` / `OPEN_PROJECT_SEARCH`（`mod+shift+e` / `mod+shift+f`）一致；无头 Linux 用 Ctrl。 */
 const FILE_EXPLORER_HOTKEY = "Control+Shift+E";
@@ -271,14 +270,33 @@ export async function waitForFileTree(page: Page): Promise<Locator> {
   return tree;
 }
 
+function fixtureBasenameRowPattern(absoluteFilePath: string): RegExp {
+  const escaped = path.basename(absoluteFilePath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped, "i");
+}
+
 /**
  * Explore：选中 **README.md**（或文件树首行）后，经 **`Upload Files`**（`title="Upload Files"`）将**单个文件**上传到当前选中目录（与 **`reaslingoUploadFileForAiChat`** 同源弹窗；**非** chat-uploads 专用路径）。
  * 用于 **`docs/用户场景.md`** §12（编辑 LaTeX 文件并生成 PDF）等到项目根等。
+ *
+ * **`replaceIfExists`**（默认 **true**）：服务端 **`createFile`** 不覆盖已存在路径；复用 **`modeling-project-uuid`** 的 E2E 项目时，先删树上同名文件再上传，避免 **`Failed to upload: …`**。
  */
-export async function uploadSingleFileViaExploreUploadDialog(page: Page, absoluteFilePath: string): Promise<void> {
+export async function uploadSingleFileViaExploreUploadDialog(
+  page: Page,
+  absoluteFilePath: string,
+  options?: { replaceIfExists?: boolean },
+): Promise<void> {
+  const replaceIfExists = options?.replaceIfExists ?? true;
+  const rowPattern = fixtureBasenameRowPattern(absoluteFilePath);
+
   await waitForFileTree(page);
   const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
   await expect(tree).toBeVisible({ timeout: 45_000 });
+
+  const existing = tree.getByRole("row", { name: rowPattern }).first();
+  if (replaceIfExists && (await existing.isVisible().catch(() => false))) {
+    await deleteIdeFileTreeRow(page, rowPattern);
+  }
 
   const readmeRow = tree.getByRole("row", { name: /readme\.md/i }).first();
   if ((await readmeRow.count()) > 0 && (await readmeRow.isVisible().catch(() => false))) {
@@ -307,6 +325,24 @@ export async function uploadSingleFileViaExploreUploadDialog(page: Page, absolut
       hasText: /Failed to upload|Upload failed:|Upload process failed/i,
     }),
   ).toHaveCount(0, { timeout: 15_000 });
+  await expect(tree.getByRole("row", { name: rowPattern }).first()).toBeVisible({ timeout: 120_000 });
+}
+
+/** 文件树右键 **Delete** 并确认（清掉服务端文件与 Loro 文档绑定）。 */
+export async function deleteIdeFileTreeRow(page: Page, rowPattern: RegExp): Promise<void> {
+  const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
+  const row = tree.getByRole("row", { name: rowPattern }).first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+
+  const dialog = page.locator('[data-slot="alert-dialog-content"]').filter({ visible: true }).first();
+  await expect(dialog.getByText(/Are you sure you want to delete/i)).toBeVisible({ timeout: 15_000 });
+  const confirmDelete = dialog.getByRole("button", { name: "Delete", exact: true });
+  await expect(confirmDelete).toBeEnabled({ timeout: 10_000 });
+  await confirmDelete.click();
+  await expect(dialog).toBeHidden({ timeout: 30_000 });
+  await expect(row).toBeHidden({ timeout: 120_000 });
 }
 
 export async function ensureReasLingoVisible(page: Page): Promise<void> {
@@ -1355,16 +1391,39 @@ export const CH7_HISTORY_RECALL_PROMPT = "what question did I asked?";
 /** §7.4 → §7.5：在 **who are you?** 探针后重命名当前会话，供 **§7.5** 稳定选中（避免与 **python-execute** 或历史脏数据混淆）。 */
 export const CH7_WHO_ARE_YOU_SESSION_TAG = "CH7 who probe";
 
+/** **`ChatHistory.tsx`** 浮层根（`bg-popover` / `slide-in-from-top`），勿用宽泛 `div:has(Search...)`。 */
 function reasLingoIdeChatHistoryPopover(page: Page): Locator {
-  return page.locator("div").filter({ has: page.getByPlaceholder("Search...") }).filter({ visible: true }).first();
+  const search = page.getByPlaceholder("Search...", { exact: true });
+  return page
+    .locator("div")
+    .filter({ has: search })
+    .filter({ has: page.locator("div.max-h-80.overflow-y-auto") })
+    .filter({ visible: true })
+    .last();
 }
 
+/**
+ * **`reaslab-iipe` `SessionItem`** 外层：`group relative` + `div[role="button"][tabindex="0"]`。
+ * 备用 `:has(svg)`（不依赖 `lucide-*` 类名）；勿 `/\d+\s+messages/`（Rename 编辑态隐藏 meta）。
+ */
 function reasLingoIdeChatHistorySessionRows(pop: Locator): Locator {
-  return pop.locator('div[role="button"][tabindex="0"]').filter({ hasText: /\d+\s+messages/i });
+  const primary = pop.locator('div.group.relative[role="button"][tabindex="0"]');
+  const fallback = pop.locator('div[role="button"][tabindex="0"]:has(svg)');
+  return primary.or(fallback);
+}
+
+/** 编辑器 **Command Palette** 打开时会挡住侧栏操作。 */
+async function dismissCommandPaletteIfOpen(page: Page): Promise<void> {
+  const palette = page.getByRole("heading", { name: "Command Palette", exact: true });
+  if (await palette.isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape");
+    await expect(palette).toBeHidden({ timeout: 5_000 });
+  }
 }
 
 /** 侧栏 **Chat History** 浮层：将**当前（列表首条 / 最新）**会话重命名为 **`tag`**。 */
 export async function reasLingoTagCurrentSessionInHistoryPopover(page: Page, tag: string): Promise<void> {
+  await dismissCommandPaletteIfOpen(page);
   const host = reasLingoInputHostLocator(page);
   await host.getByTitle("Chat History").click();
   const pop = reasLingoIdeChatHistoryPopover(page);
@@ -1372,13 +1431,16 @@ export async function reasLingoTagCurrentSessionInHistoryPopover(page: Page, tag
   await expect(pop.getByText(/Loading chat history/i)).toBeHidden({ timeout: 120_000 });
 
   const sessionRows = reasLingoIdeChatHistorySessionRows(pop);
-  await expect(sessionRows.first()).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => sessionRows.count(), { timeout: 60_000, intervals: [200, 500, 1_000, 2_000] })
+    .toBeGreaterThan(0);
   const currentRow = sessionRows.first();
+  await expect(currentRow).toBeVisible({ timeout: 15_000 });
 
   await currentRow.scrollIntoViewIfNeeded();
   await currentRow.hover();
   await currentRow.getByTitle("Rename").click();
-  const titleInput = currentRow.getByRole("textbox");
+  const titleInput = currentRow.locator('input[type="text"]');
   await expect(titleInput).toBeVisible({ timeout: 10_000 });
   await titleInput.fill(tag);
   await currentRow.getByTitle("Save").click();
@@ -1414,8 +1476,7 @@ export const MODELING_CH7_HISTORY_TWO_SESSIONS_SKIP_MSG =
  * **`docs/用户场景.md` §7.5**：**Chat History** → 选择 **§7.4** 打标会话 **`CH7_WHO_ARE_YOU_SESSION_TAG`**（无标签时回退 **who are you** 标题 / 最下一条）→ 发送 **`CH7_HISTORY_RECALL_PROMPT`** →
  * 流结束后侧栏正文含 **`who are you`**（与 **§7.4** 默认 Agent **who are you?** 对齐）。
  *
- * **会话行定位**：`reaslab-iipe` **`SessionItem`** 为 **`div role="button"`**（标题 + **`N messages`**）；行内另有 Rename/Delete 等原生 **`<button>`**，
- * 须用 **`div[role="button"][tabindex="0"]` + `hasText(/\d+\s+messages/)`**，避免把操作钮算进会话数。
+ * **会话行定位**：见 **`reasLingoIdeChatHistorySessionRows`**（`SessionItem` 的 **`div.group.relative[role="button"]`**）。
  *
  * @returns **`true`** 已断言成功；**`false`** 表示历史少于 **2** 条（调用方 **`test.skip`**）。
  */
@@ -1427,6 +1488,7 @@ export async function reasLingoSelectBottomHistorySessionAndAssertRecallWhoAreYo
   await expect(host).toBeVisible({ timeout: 20_000 });
 
   await test.step("§7.5-1：Chat History → 等待列表加载", async () => {
+    await dismissCommandPaletteIfOpen(page);
     await host.getByTitle("Chat History").click();
     const pop = reasLingoIdeChatHistoryPopover(page);
     await expect(pop).toBeVisible({ timeout: 15_000 });
@@ -1731,25 +1793,9 @@ export const REASFLOW_COPILOT_AGENT_MENU_LABEL = /ReasFlow Copilot|Paper Copilot
 export const THEOREM_CH8_REASFLOW_COPILOT_SKIP_MSG =
   "§8.4 切换 ReasFlow Copilot：侧栏 Agent 菜单无 **ReasFlow Copilot**（或旧版 **Paper Copilot**），跳过。";
 
-/** `docs/用户场景.md` §16：无法从 **Theorem Proving Templates** 进入 MIL 定理 IDE 时的 **`test.skip`** 说明。 */
-export const REASFLOW_CH16_SKIP_MSG =
-  "§16：无法从 Theorem Proving Templates 进入 MIL 定理证明 IDE；请确认已登录且模板可用（首次 lake 可能极慢），或 test/data/.e2e-artifacts/reasflow-copilot-theorem-project-uuid.txt 仍有效。";
-
-/** `docs/用户场景.md` §16：**ReasFlow Copilot** 菜单不可见时的 **`test.skip`** 说明。 */
-export const REASFLOW_CH16_AGENT_SKIP_MSG =
-  "§16：侧栏 Agent 菜单无 **ReasFlow Copilot**（或旧版 **Paper Copilot**），跳过。";
-
-/** `docs/用户场景.md` §16.2：**ReasPro** / **ReasProX** 均不可选时的 **`test.skip`** 说明。 */
-export const REASFLOW_CH16_MODEL_SKIP_MSG =
-  "§16.2：ReasFlow Copilot 须 **ReasPro** 或 **ReasProX**；当前模型列表中均不可选，跳过。";
-
 /** `paper-generation` 输入 placeholder（`builtin.rs` **ReasFlow Copilot**）。 */
 export const REASFLOW_COPILOT_INPUT_PLACEHOLDER =
   "Research topic, outline, or what you want ReasFlow Copilot to help with";
-
-/** `docs/用户场景.md` §16.3：轻量科研写作探针（禁止全论文流水线 / PDF）。 */
-export const CH16_REASFLOW_WRITING_PROBE =
-  "Outline a 3-section structure for a short survey on gradient descent optimization. Reply in bullet points only. Do not invoke sub-agents or generate PDF." as const;
 
 /** `docs/用户场景.md` §8.5（读取 Getting Started Lean）：无法切回 **Default** 或 **read_file** 探针未命中时的 **`test.skip`** 说明。 */
 export const THEOREM_CH8_LEAN_MCP_SKIP_MSG =
@@ -1949,19 +1995,21 @@ export async function createModelingProjectFromFirstOptimizationTemplate(page: P
   }
 }
 
-export async function tryEnterOptimizationTemplateModelingIde(page: Page): Promise<boolean> {
-  const openByUuid = async (uuid: string): Promise<boolean> => {
-    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
+async function openCachedProjectIdeByUuid(page: Page, uuid: string): Promise<boolean> {
+  try {
+    const res = await gotoWithRetry(page, absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
     if (!res?.ok() && res?.status() !== 304) {
       return false;
     }
-    try {
-      await waitForFileTree(page);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+    await waitForFileTree(page);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function tryEnterOptimizationTemplateModelingIde(page: Page): Promise<boolean> {
+  const openByUuid = openCachedProjectIdeByUuid;
 
   const cached = readOptimizationTemplateProjectUuidArtifact();
   if (cached && (await openByUuid(cached))) {
@@ -2025,18 +2073,7 @@ export async function createModelingProjectFromFirstContestTemplate(page: Page):
 }
 
 export async function tryEnterContestTemplateModelingIde(page: Page): Promise<boolean> {
-  const openByUuid = async (uuid: string): Promise<boolean> => {
-    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
-    if (!res?.ok() && res?.status() !== 304) {
-      return false;
-    }
-    try {
-      await waitForFileTree(page);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const openByUuid = openCachedProjectIdeByUuid;
 
   const cached = readModelingContestTemplateProjectUuidArtifact();
   if (cached && (await openByUuid(cached))) {
@@ -2055,22 +2092,14 @@ export async function tryEnterContestTemplateModelingIde(page: Page): Promise<bo
 }
 
 export async function tryEnterModelingProjectIde(page: Page): Promise<boolean> {
-  const openByUuid = async (uuid: string): Promise<boolean> => {
-    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
-    if (!res?.ok() && res?.status() !== 304) {
-      return false;
-    }
-    try {
-      await waitForFileTree(page);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const openByUuid = openCachedProjectIdeByUuid;
 
   const cached = readModelingProjectUuidArtifact();
   if (cached && (await openByUuid(cached))) {
     return true;
+  }
+  if (cached) {
+    clearModelingProjectUuidArtifact();
   }
 
   const ok = await createBlankModelingProjectAndEnterIde(page);
@@ -2085,18 +2114,7 @@ export async function tryEnterModelingProjectIde(page: Page): Promise<boolean> {
 }
 
 export async function tryEnterLeanProjectIde(page: Page): Promise<boolean> {
-  const openByUuid = async (uuid: string): Promise<boolean> => {
-    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
-    if (!res?.ok() && res?.status() !== 304) {
-      return false;
-    }
-    try {
-      await waitForFileTree(page);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const openByUuid = openCachedProjectIdeByUuid;
 
   const cached = readTheoremProjectUuidArtifact();
   if (cached && (await openByUuid(cached))) {
@@ -2111,38 +2129,6 @@ export async function tryEnterLeanProjectIde(page: Page): Promise<boolean> {
   const m = page.url().match(/\/projects\/([^/]+)/i);
   if (m?.[1]) {
     writeTheoremProjectUuidArtifact(m[1]);
-  }
-  return true;
-}
-
-/** `docs/用户场景.md` §16.1：Theorem Proving Templates → MIL → IDE（独立 artifact，不依赖 §8）。 */
-export async function tryEnterReasFlowCopilotTheoremIde(page: Page): Promise<boolean> {
-  const openByUuid = async (uuid: string): Promise<boolean> => {
-    const res = await page.goto(absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
-    if (!res?.ok() && res?.status() !== 304) {
-      return false;
-    }
-    try {
-      await waitForFileTree(page);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const cached = readReasFlowCopilotTheoremProjectUuidArtifact();
-  if (cached && (await openByUuid(cached))) {
-    return true;
-  }
-
-  await navigateToHomeProjects(page);
-  const ok = await createTheoremProvingProjectFromMilTemplate(page);
-  if (!ok) {
-    return false;
-  }
-  const m = page.url().match(/\/projects\/([^/]+)/i);
-  if (m?.[1]) {
-    writeReasFlowCopilotTheoremProjectUuidArtifact(m[1]);
   }
   return true;
 }
@@ -2322,4 +2308,19 @@ export async function openLeafFile(page: Page, segments: readonly string[]): Pro
   const fileNode = tree.getByText(fileName, { exact: true }).first();
   await expect(fileNode).toBeVisible({ timeout: 20_000 });
   await fileNode.click();
+}
+
+
+/** 项目 IDE **Explore** 根目录新建文件（与 **`15-reaslingo-home`** 文件树交互一致）。 */
+export async function createProjectIdeRootFile(page: Page, fileName: string): Promise<void> {
+  await page.getByTitle("Create New File").first().click();
+  const input = page.locator('[data-filetree-node="true"] input').first();
+  await expect(input).toBeVisible({ timeout: 15_000 });
+  await input.fill(fileName);
+  await input.press("Enter");
+  const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
+  const escaped = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await expect(tree.getByRole("row", { name: new RegExp(escaped, "i") }).first()).toBeVisible({
+    timeout: 60_000,
+  });
 }
