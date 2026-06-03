@@ -75,7 +75,7 @@ function editorToolbarIconLocator(toolbar: Locator, page: Page, icon: EditorTool
 }
 
 /**
- * 断言当前活动编辑器 **`EditorToolbar`** 按钮集合（**`docs/用户场景.md`** 附录 A）。
+ * 断言当前活动编辑器 **`EditorToolbar`** 按钮集合（iipe **`editor-toolbar.tsx`** / **§16**）。
  * **`present`** 须与源码顺序一致，并校验按钮总数。
  */
 export async function assertEditorToolbarIcons(

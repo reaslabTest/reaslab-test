@@ -16,7 +16,7 @@ pnpm install
 
 所有命令均基于 **`common/playwright.config.ts`**（`testDir` 为仓库根；**`globalSetup`** 在跑用例前执行一次登录并写入 **`common/.auth/storage-state.json`**）。
 
-WSL 访问 beta 若出现 **`ERR_CONNECTION_CLOSED`**，见 **`docs/本地E2E-reaslab-iipe.md`**（推荐 **`export E2E_BASE_URL=http://127.0.0.1:3000`** 联调 **`reaslab-iipe`** 本地前端）；导航已含 **`common/e2e-nav.ts`** 重试，本地非 CI 用例默认 **`retries: 1`**。
+WSL 访问 beta 若出现 **`ERR_CONNECTION_CLOSED`** 等网络错误，可设 **`export E2E_BASE_URL=http://127.0.0.1:3000`** 指向本地前端；导航已含 **`common/e2e-nav.ts`** 重试，本地非 CI 用例默认 **`retries: 1`**。
 
 约定：**无后缀** = 无头 Chromium；**`:headed`** = 有界面（等价于再给 Playwright 传 **`--headed`**）。
 
@@ -49,6 +49,10 @@ WSL 访问 beta 若出现 **`ERR_CONNECTION_CLOSED`**，见 **`docs/本地E2E-re
 | `test/13-project-list.test.ts` | `pnpm run test:13` | `pnpm run test:13:headed` |
 | `test/14-browse-templates.test.ts` | `pnpm run test:14` | `pnpm run test:14:headed` |
 | `test/15-reaslingo-home.test.ts` | `pnpm run test:15` | `pnpm run test:15:headed` |
+| `test/16-editor-toolbar.test.ts` | `pnpm run test:16` | `pnpm run test:16:headed` |
+| `test/17-playground-suite.test.ts` | `pnpm run test:17` | `pnpm run test:17:headed` |
+| `test/18-new-project.test.ts` | `pnpm run test:18` | `pnpm run test:18:headed` |
+| `test/19-project-list-actions.test.ts` | `pnpm run test:19` | `pnpm run test:19:headed` |
 
 新增 **`test/`** 下的测试文件时，请在 **`package.json`** 按 **`test:<编号>`** 补成对脚本（无头 + `:headed`），`playwright` 命令里写路径如 **`test/05-foo.test.ts`**。
 

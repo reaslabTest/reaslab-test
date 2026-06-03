@@ -1,0 +1,2 @@
+-- E2E playground load fixture (txt)
+#eval 1 + 2

@@ -39,6 +39,12 @@
     "test:16": "playwright test --config common/playwright.config.ts test/16-editor-toolbar.test.ts",
     "test:16:headed": "playwright test --config common/playwright.config.ts test/16-editor-toolbar.test.ts --headed",
     "test:16:local:headed": "E2E_BASE_URL=http://127.0.0.1:3000 playwright test --config common/playwright.config.ts test/16-editor-toolbar.test.ts --headed",
+    "test:17": "playwright test --config common/playwright.config.ts test/17-playground-suite.test.ts",
+    "test:17:headed": "playwright test --config common/playwright.config.ts test/17-playground-suite.test.ts --headed",
+    "test:18": "playwright test --config common/playwright.config.ts test/18-new-project.test.ts",
+    "test:18:headed": "playwright test --config common/playwright.config.ts test/18-new-project.test.ts --headed",
+    "test:19": "playwright test --config common/playwright.config.ts test/19-project-list-actions.test.ts",
+    "test:19:headed": "playwright test --config common/playwright.config.ts test/19-project-list-actions.test.ts --headed",
 
     "reaslab-test": "node run.mjs --scope-file=common/run-scope-beta.txt",
 

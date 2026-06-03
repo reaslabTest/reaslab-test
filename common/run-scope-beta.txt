@@ -14,6 +14,9 @@ browse-templates            	12
 latex                       	13
 reaslingo-home              	14
 editor-toolbar              	15
+playground-suite            	16
+new-project                 	17
+project-list-actions        	18
 project-list                	-1
 # 规则：
 #   - 以 # 开头的行为注释；空行忽略。

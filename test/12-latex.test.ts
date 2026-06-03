@@ -5,11 +5,14 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   ensureReasLingoVisible,
+  MODELING_CH5_REOPEN_SKIP_MSG,
   MODELING_CH5_SKIP_MSG,
   reasLingoDefaultAgentTexMcpCompileLogProbe,
   tryEnterModelingProjectIde,
+  tryReopenModelingProjectIde,
   uploadSingleFileViaExploreUploadDialog,
 } from "./helpers";
+import { readModelingProjectUuidArtifact } from "./data/e2e-modeling-project-artifact";
 
 const TEST_UPLOAD_TEX = path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "test_upload.tex");
 
@@ -51,11 +54,23 @@ async function openTexPreviewThenCompileButton(page: Page): Promise<void> {
 }
 
 /**
+ * **§12.1**：全量跑时复用 **§5.1** 写入的 **`modeling-project-uuid.txt`**（**不**清 artifact、**不**新建）；
+ * 单跑本章且无缓存时才 **`tryEnterModelingProjectIde`** 创建一次。
+ */
+async function enterModelingProjectForChapter12(page: Page): Promise<boolean> {
+  if (readModelingProjectUuidArtifact()) {
+    return tryReopenModelingProjectIde(page);
+  }
+  return tryEnterModelingProjectIde(page);
+}
+
+/**
  * **用户场景 §12**：编辑 LaTeX 文件并生成 PDF（见 `docs/用户场景.md`）。
- * **12.1（E2E）**：数学建模项目 **`tryEnterModelingProjectIde`**；上传 **`test/data/test_upload.tex`** → 眼睛打开侧栏 → **Compile** → **canvas**。
- * **§12.2（调用latexmk）**：**`reasLingoDefaultAgentTexMcpCompileLogProbe`**（兼容 **compile_tex**）。
+ * **12.1（E2E）**：复用 §5 建模项目（或单跑时创建一次）；上传 **`test/data/test_upload.tex`** → **Compile** → **canvas**。
+ * **§12.2（调用latexmk）**：同一工程（**`tryReopenModelingProjectIde`**，须已有 **`test_upload.tex`**）。
  */
 test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
+  test.describe.configure({ mode: "serial" });
   test.setTimeout(600_000);
 
   test.beforeEach(async ({ page }) => {
@@ -70,7 +85,9 @@ test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
   });
 
   test("12.1 上传本地 LaTeX 并编译预览", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    const hasCached = Boolean(readModelingProjectUuidArtifact());
+    const ok = await enterModelingProjectForChapter12(page);
+    test.skip(!ok, hasCached ? MODELING_CH5_REOPEN_SKIP_MSG : MODELING_CH5_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
     await test.step("Explore：上传 test_upload.tex 至项目根", async () => {
@@ -105,11 +122,14 @@ test.describe("12. 编辑 LaTeX 文件并生成 PDF", () => {
   });
 
   test("12.2 调用latexmk", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await expect(page.getByTitle("Create New File")).toBeVisible({ timeout: 30_000 });
 
-    await test.step("Explore：上传 test_upload.tex 至项目根", async () => {
-      await uploadSingleFileViaExploreUploadDialog(page, TEST_UPLOAD_TEX);
+    await test.step("确认根目录已有 test_upload.tex（§12.1 上传）", async () => {
+      const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
+      await expect(tree.getByRole("row", { name: /test_upload\.tex/i }).first()).toBeVisible({
+        timeout: 60_000,
+      });
     });
 
     await test.step("ReasLingo：Default Agent → New Chat → latexmk 编译探针", async () => {
