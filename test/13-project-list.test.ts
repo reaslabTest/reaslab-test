@@ -33,6 +33,23 @@ async function projectDisplayNameFromListRow(row: Locator): Promise<string> {
   return "";
 }
 
+/** 等待 **My Projects** 面板内项目列表加载完成（`useProjects()` 异步；首帧 `count()` 常为 0）。 */
+async function waitForMyProjectsTableRows(panel: Locator, timeoutMs = 90_000): Promise<number> {
+  await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
+  await panel.getByPlaceholder("Search projects...").fill("");
+  let count = 0;
+  await expect
+    .poll(
+      async () => {
+        count = await projectsTableDataRowsInTabPanel(panel).count();
+        return count;
+      },
+      { timeout: timeoutMs, intervals: [400, 800, 1_200, 2_000] },
+    )
+    .toBeGreaterThan(0);
+  return count;
+}
+
 test.describe("13. 项目列表查看及管理", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(240_000);
@@ -76,16 +93,16 @@ test.describe("13. 项目列表查看及管理", () => {
       await page.getByRole("tab", { name: "My Projects" }).click();
 
       const panel = projectsTabPanel(page, "My Projects");
-      await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
-      // 仅去掉上次会话留在搜索框里的筛选，避免数到 0 行误 skip；不作按名称搜索。
-      await panel.getByPlaceholder("Search projects...").fill("");
-      const rows = projectsTableDataRowsInTabPanel(panel);
-      if ((await rows.count()) === 0) {
+      const rowCount = await waitForMyProjectsTableRows(panel)
+        .then((n) => n)
+        .catch(() => 0);
+      if (rowCount === 0) {
         test.skip(
           true,
           "My Projects 无自有项目：13.1 不新建项目，请先运行其它用例在本账号下创建至少一个项目。",
         );
       }
+      const rows = projectsTableDataRowsInTabPanel(panel);
       const firstRow = rows.first();
       projectName = (await projectDisplayNameFromListRow(firstRow)).trim();
       expect(projectName.length).toBeGreaterThan(0);
