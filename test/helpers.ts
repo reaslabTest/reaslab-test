@@ -480,47 +480,57 @@ export async function reasLingoAttachProjectFileViaAtMention(
 /**
  * 将本地文件上传到项目的 **`chat-uploads/`** 下，供 §5.2～§5.4 等 ReasLingo 用例使用。
  *
- * **与当前产品、手动成功路径一致**：左侧 Explore 工具栏 **`title="Upload Files"`**（`file-tree-toolbar`）
- * → 弹窗标题 **「Upload Files」**（`upload-dialog.tsx`）→ 对隐藏 file input 做 **`setInputFiles`**
- *（等效于点 **「Select Files」** 再选文件）。上传目标目录为选中行对应的父路径：此处先保证存在
- * **`chat-uploads`** 文件夹并选中该行，使文件落在 **`chat-uploads/<文件名>`**。
- *
- * 不再依赖 ReasLingo 输入条上的 **「Upload Files for AI Chat」** 及其「Upload & Reference」弹窗——
- * 与你在截图中的手动流程一致；`reasLingoInputHost` 仍保留在签名上以免改动各用例调用处。
+ * 与 **`reaslab-iipe`** `useAIFileUpload` / **`FileUpload.tsx`** 一致：ReasLingo 输入条
+ * **「Upload Files for AI Chat」** → **Upload & Reference**；由 gRPC 自动创建 **`chat-uploads`**
+ * 并写入 **`/chat-uploads/<文件名>`**（勿依赖 Explore **`uploadTargetAtom`** 与手动建文件夹）。
  */
 export async function reaslingoUploadFileForAiChat(
   page: Page,
   reasLingoInputHost: Locator,
   filePath: string,
 ): Promise<void> {
-  void reasLingoInputHost;
-
-  await waitForFileTree(page);
-  const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
-  await expect(tree).toBeVisible({ timeout: 45_000 });
-
-  await ensureChatUploadsFolderInIdeFileTree(page);
-  await expandIdeFileTreeRowByLabel(page, /chat-uploads/i);
-
-  const uploadBtn = page.locator('button[title="Upload Files"]').first();
-  await uploadBtn.scrollIntoViewIfNeeded();
+  await ensureReasLingoVisible(page);
+  const uploadBtn = reasLingoInputHost.getByTitle("Upload Files for AI Chat");
+  await expect(uploadBtn).toBeVisible({ timeout: 15_000 });
   await uploadBtn.click();
 
-  const uploadDialog = page.getByRole("dialog").filter({
-    has: page.getByRole("button", { name: "Select Files", exact: true }),
+  const dialog = page.getByRole("dialog").filter({
+    has: page.getByRole("heading", { name: "Upload Files for AI Chat" }),
   });
-  await expect(uploadDialog).toBeVisible({ timeout: 15_000 });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-  const fileInput = uploadDialog.locator('input[type="file"]:not([webkitdirectory])').first();
+  const fileInput = dialog.locator('input[type="file"]:not([webkitdirectory])').first();
   await expect(fileInput).toBeAttached({ timeout: 10_000 });
   await fileInput.setInputFiles(filePath);
 
-  await expect(uploadDialog).toBeHidden({ timeout: 180_000 });
+  const confirm = dialog.getByRole("button", { name: /Upload & Reference/i });
+  await expect(confirm).toBeEnabled({ timeout: 15_000 });
+  await confirm.click();
+
+  await expect(dialog).toBeHidden({ timeout: 180_000 });
   await expect(
     page.locator("[data-sonner-toast]").filter({
-      hasText: /Failed to upload|Upload failed:|Upload process failed/i,
+      hasText: /Failed to upload|Upload failed:|AI file upload process failed/i,
     }),
   ).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Sync: Connected" })).toBeVisible({ timeout: 120_000 });
+  await expectChatUploadsFileInIdeTree(page, path.basename(filePath));
+  const baseName = path.basename(filePath);
+  await expect(
+    reasLingoInputHost
+      .getByRole("button", { name: baseName, exact: true })
+      .or(reasLingoInputHost.locator("div.rounded-lg").filter({ hasText: baseName }))
+      .first(),
+  ).toBeVisible({ timeout: 30_000 });
+}
+
+/** 断言 **`chat-uploads/<baseName>`** 已出现在 Explore 文件树（`data-name` 与 `@reaslab/file-tree` 一致）。 */
+export async function expectChatUploadsFileInIdeTree(page: Page, baseName: string): Promise<void> {
+  const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
+  await expandIdeFileTreeRowByLabel(page, /chat-uploads/i);
+  await expect(tree.locator(`span[data-name="/chat-uploads/${baseName}"]`)).toBeVisible({
+    timeout: 180_000,
+  });
 }
 
 /** 在 Explore 文件树中保证存在 `chat-uploads` 目录（无则在本机「Create new folder」下创建）。 */
@@ -1766,6 +1776,10 @@ export const MIL_GETTING_STARTED_SEGMENTS = ["MIL", "C01_Introduction", "S01_Get
 export const MODELING_CH5_SKIP_MSG =
   "无法进入数学建模 IDE：请确认已登录且 New Project 可创建 Modeling 项目，或 test/data/.e2e-artifacts/modeling-project-uuid.txt 仍有效。";
 
+/** `docs/用户场景.md` §5.2 起：须复用 §5.1 写入的项目 UUID，**不得**再新建空白项目。 */
+export const MODELING_CH5_REOPEN_SKIP_MSG =
+  "§5 串行用例须复用 5.1 创建的项目：请确认 test/data/.e2e-artifacts/modeling-project-uuid.txt 存在且对应 /projects/<uuid> 可打开。";
+
 /** `docs/用户场景.md` §5.9：**Chain of Thought** 依赖系统默认或至少一枚启用模型的 **`supportsReasoning`**（Auto 下默认可推理时亦可见）。 */
 export const MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG =
   "§5.9 Chain of Thought：系统默认与已启用模型均不支持 reasoning（Auto 与手动切换后仍无 CoT 按钮），跳过。";
@@ -1997,12 +2011,18 @@ export async function createModelingProjectFromFirstOptimizationTemplate(page: P
 
 async function openCachedProjectIdeByUuid(page: Page, uuid: string): Promise<boolean> {
   try {
-    const res = await gotoWithRetry(page, absUrl(`/projects/${uuid}`), { waitUntil: "domcontentloaded" });
+    const res = await gotoWithRetry(page, absUrl(`/projects/${uuid}`), {
+      waitUntil: "domcontentloaded",
+      attempts: 6,
+      backoffMs: 2_000,
+    });
     if (!res?.ok() && res?.status() !== 304) {
       return false;
     }
+    await page.getByTitle("Create New File").waitFor({ state: "visible", timeout: 120_000 });
     await waitForFileTree(page);
-    return true;
+    const m = page.url().match(/\/projects\/([^/]+)/i);
+    return m?.[1] === uuid;
   } catch {
     return false;
   }
@@ -2111,6 +2131,26 @@ export async function tryEnterModelingProjectIde(page: Page): Promise<boolean> {
     writeModelingProjectUuidArtifact(m[1]);
   }
   return true;
+}
+
+/**
+ * 仅重新打开 §5.1 缓存的 Modeling 项目（**`readModelingProjectUuidArtifact`**）。
+ * §5.2 起串行用例须调用此函数：打开失败时 **不** 清 artifact、**不** 新建项目。
+ */
+export async function tryReopenModelingProjectIde(page: Page): Promise<boolean> {
+  const cached = readModelingProjectUuidArtifact();
+  if (!cached) {
+    return false;
+  }
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (await openCachedProjectIdeByUuid(page, cached)) {
+      return true;
+    }
+    if (attempt < 3) {
+      await page.waitForTimeout(2_000 * (attempt + 1));
+    }
+  }
+  return false;
 }
 
 export async function tryEnterLeanProjectIde(page: Page): Promise<boolean> {

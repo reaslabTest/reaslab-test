@@ -7,14 +7,14 @@ import { E2E_SHARE_INVITE_EMAIL } from "../common/global-setup";
 import { clearModelingProjectUuidArtifact } from "./data/e2e-modeling-project-artifact";
 import {
   MODELING_CH5_CHAIN_OF_THOUGHT_SKIP_MSG,
+  MODELING_CH5_REOPEN_SKIP_MSG,
   MODELING_CH5_SKIP_MSG,
   ensureReasLingoVisible,
-  expandIdeFileTreeRowByLabel,
-  reasLingoAttachProjectFileViaAtMention,
+  expectChatUploadsFileInIdeTree,
   reasLingoInputHostLocator,
   reaslingoUploadFileForAiChat,
   tryEnterModelingProjectIde,
-  waitForFileTree,
+  tryReopenModelingProjectIde,
   waitForReasLingoAssistantReplyDone,
 } from "./helpers";
 
@@ -24,11 +24,6 @@ const TEST_UPLOAD_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 const MODELING_CH5_4_ACP_AUTH_SKIP_MSG =
   "§5.4：默认 Agent（ACP）需 llm-gateway 认证；当前环境 authenticate 未通过（toast「Authentication required before sending a prompt」），跳过。";
 
-/** 与 `@reaslab/file-tree` 节点 `data-name` 一致；避免树上另有 `/test_upload.png` 时 `getByText` 触发 strict 双匹配。 */
-function chatUploadsTestPngTreeLabel(fileTree: Locator) {
-  return fileTree.locator(`span[data-name="/chat-uploads/test_upload.png"]`);
-}
-
 /** §5.3 / §5.4：用**全英文**提问（避免非英文与 OCR 组合下乱码 / OCR Failed）；要求只输出数字答案（与 `test_upload.png` 图中「二加二」→ 4 一致）。 */
 const CH5_FIXTURE_QUESTION_PROMPT =
   "Answer the question shown in the image. Reply with exactly one Arabic numeral and nothing else.";
@@ -37,11 +32,40 @@ function reasLingoHosts(page: Page) {
   return { reasLingoInputHost: reasLingoInputHostLocator(page) };
 }
 
-/** `FileReferences.tsx` 附件芯片（`div.rounded-lg`，含 OCR Processing / OCR Failed 标签）。 */
-function reasLingoFileReferenceChip(reasLingoInputHost: Locator, fileName: string) {
+/** `FileReferences.tsx`：OCR 完成后 **`role="button"`**；处理中为 **`div.rounded-lg`**。 */
+function reasLingoFileReferenceChipLocator(reasLingoInputHost: Locator, fileName: string): Locator {
   return reasLingoInputHost
-    .getByText(fileName, { exact: true })
-    .locator("xpath=ancestor::div[contains(@class,'rounded-lg')][1]");
+    .getByRole("button", { name: fileName, exact: true })
+    .or(reasLingoInputHost.locator("div.rounded-lg").filter({ hasText: fileName }))
+    .first();
+}
+
+/** 等待输入条上 **`fileName`** 引用芯片完成 Upload / OCR（`FileReferences.tsx` 状态标签消失）。 */
+async function waitForReasLingoFileReferenceOcrReady(
+  reasLingoInputHost: Locator,
+  fileName: string,
+): Promise<void> {
+  const chip = () => reasLingoFileReferenceChipLocator(reasLingoInputHost, fileName);
+  await expect(chip()).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () => {
+        if (
+          await reasLingoInputHost.getByText("OCR Processing", { exact: true }).isVisible().catch(() => false)
+        ) {
+          return false;
+        }
+        if (await reasLingoInputHost.getByText("Uploading", { exact: true }).isVisible().catch(() => false)) {
+          return false;
+        }
+        if (await reasLingoInputHost.getByText("OCR Failed", { exact: true }).isVisible().catch(() => false)) {
+          throw new Error(`§5.3 OCR Failed：${fileName}`);
+        }
+        return await chip().isVisible().catch(() => false);
+      },
+      { timeout: 120_000, intervals: [500, 1_000, 2_000] },
+    )
+    .toBe(true);
 }
 
 /**
@@ -249,12 +273,6 @@ async function ensureWebSearchControlReady(page: Page, reasLingoInputHost: Locat
   await expect(reasLingoInputHost.getByTitle("Web Search").first()).toBeVisible({ timeout: 20_000 });
 }
 
-/** 通过 `@` 提及选中工程内 `chat-uploads/test_upload.png`（不再走 Explore `setInputFiles`，与 §5.2 单次上传一致）。 */
-async function attachTestUploadPngViaAtMention(page: Page, reasLingoInputHost: Locator): Promise<void> {
-  await ensureReasLingoVisible(page);
-  await reasLingoAttachProjectFileViaAtMention(page, reasLingoInputHost, "test_upload.png", "test_upload");
-}
-
 test.describe("5. 创建空白项目并使用基础功能", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(600_000);
@@ -282,63 +300,39 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
     await expect(
       page.locator(".bg-sidebar button").filter({ has: page.locator("svg.lucide-sliders-horizontal") }),
     ).toBeVisible({ timeout: 30_000 });
-  });
 
-  test("5.2 上传图片", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
-    await ensureReasLingoVisible(page);
-
-    const { reasLingoInputHost } = reasLingoHosts(page);
-
-    await reaslingoUploadFileForAiChat(page, reasLingoInputHost, TEST_UPLOAD_PNG);
-
-    const fileTreePanel = page.locator(".ide-filetree").filter({ visible: true }).first();
-    await expandIdeFileTreeRowByLabel(page, /chat-uploads/i);
-    // Explore 上传只保证进工程树，不保证 ReasLingo 输入条出现文件名芯片。
-    await expect(chatUploadsTestPngTreeLabel(fileTreePanel)).toBeVisible({
-      timeout: 180_000,
+    // §5.1～5.3 共用同一 page，避免 5.2 上传后 5.3 新 page 重开项目时丢文件或 reopen 失败被 skip。
+    await test.step("5.2 上传图片", async () => {
+      await ensureReasLingoVisible(page);
+      const { reasLingoInputHost } = reasLingoHosts(page);
+      await reaslingoUploadFileForAiChat(page, reasLingoInputHost, TEST_UPLOAD_PNG);
     });
-  });
 
-  test("5.3 使用OCR进行AI会话", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
-    await ensureReasLingoVisible(page);
+    await test.step("5.3 使用OCR进行AI会话", async () => {
+      await ensureReasLingoVisible(page);
+      const { reasLingoInputHost } = reasLingoHosts(page);
 
-    const { reasLingoInputHost } = reasLingoHosts(page);
+      await expectChatUploadsFileInIdeTree(page, "test_upload.png");
+      // 5.2「Upload & Reference」已在输入条挂载芯片；勿再 `@` 引用，否则会出现双芯片导致 strict 失败。
+      await waitForReasLingoFileReferenceOcrReady(reasLingoInputHost, "test_upload.png");
 
-    // §5.2 已 Explore 上传一次；此处不再 `setInputFiles`，仅用 `@` 提及引用工程内文件，避免重复上传。
-    await waitForFileTree(page);
-    const fileTreePanel = page.locator(".ide-filetree").filter({ visible: true }).first();
-    await expandIdeFileTreeRowByLabel(page, /chat-uploads/i);
-    await expect(chatUploadsTestPngTreeLabel(fileTreePanel)).toBeVisible({
-      timeout: 180_000,
+      const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
+      await modelBtn.click();
+      const modelPanel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
+      await expect(modelPanel).toBeVisible({ timeout: 10_000 });
+      const autoSwitch = modelPanel.getByRole("switch");
+      if (!(await autoSwitch.isChecked())) {
+        await autoSwitch.click();
+      }
+      await page.keyboard.press("Escape");
+
+      await sendReasLingoPromptAndWaitForReply(page, reasLingoInputHost, CH5_FIXTURE_QUESTION_PROMPT);
+      await expectLastAssistantNumeralAnswer(reasLingoInputHost, "4");
     });
-    await attachTestUploadPngViaAtMention(page, reasLingoInputHost);
-
-    const pngChip = reasLingoFileReferenceChip(reasLingoInputHost, "test_upload.png");
-    await expect(pngChip.getByText("OCR Processing", { exact: true })).toBeHidden({
-      timeout: 120_000,
-    });
-    await expect(pngChip.getByText("Uploading", { exact: true })).toBeHidden({ timeout: 120_000 });
-
-    const modelBtn = reasLingoInputHost.getByTitle("Switch Model");
-    await modelBtn.click();
-    const modelPanel = page.getByRole("menu").filter({ has: page.getByRole("switch") }).first();
-    await expect(modelPanel).toBeVisible({ timeout: 10_000 });
-    const autoSwitch = modelPanel.getByRole("switch");
-    if (!(await autoSwitch.isChecked())) {
-      await autoSwitch.click();
-    }
-    await page.keyboard.press("Escape");
-
-    await sendReasLingoPromptAndWaitForReply(page, reasLingoInputHost, CH5_FIXTURE_QUESTION_PROMPT);
-
-    // 成功标准：助理就图中问题给出数字 4（可用 OCR 或 Agent `read_file` 读图）。
-    await expectLastAssistantNumeralAnswer(reasLingoInputHost, "4");
   });
 
   test("5.4 默认 Agent 进行 AI 会话", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await ensureReasLingoVisible(page);
 
     const { reasLingoInputHost } = reasLingoHosts(page);
@@ -362,7 +356,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.5 邀请他人共同编辑项目", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await page.getByRole("button", { name: "Share", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Sharing Project" })).toBeVisible({
@@ -385,7 +379,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.6 查看项目的修改历史", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     const historyBtn = page.getByRole("button", { name: "History", exact: true });
     await expect(historyBtn).toBeVisible({ timeout: 15_000 });
     await historyBtn.click();
@@ -402,7 +396,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.7 项目内搜索关键字", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await page.getByRole("button", { name: "Project Search" }).click();
     const searchInput = page.getByPlaceholder("Enter to search");
     await expect(searchInput).toBeVisible({ timeout: 15_000 });
@@ -436,7 +430,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.8 导出项目", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await page.getByRole("button", { name: "Menu" }).click();
     const zipBtn = page.getByRole("button", { name: /Source \(ZIP\)/ });
     await expect(zipBtn).toBeVisible({ timeout: 15_000 });
@@ -447,7 +441,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.9 AI会话设置（Chain of Thought）", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
@@ -470,7 +464,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.10 AI会话设置（Web Search）", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
@@ -504,7 +498,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.11 AI会话设置（More Settings）", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
     await widenViewportForReasLingoInputToolbar(page);
     await ensureReasLingoVisible(page);
 
@@ -597,7 +591,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.12 Menu：更改主题为 Dark", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
 
     await page.getByRole("button", { name: "Menu" }).click();
     const settingsSheet = page
@@ -632,7 +626,7 @@ test.describe("5. 创建空白项目并使用基础功能", () => {
   });
 
   test("5.13 Solver Settings：展开 Gurobi WLS License", async ({ page }) => {
-    test.skip(!(await tryEnterModelingProjectIde(page)), MODELING_CH5_SKIP_MSG);
+    test.skip(!(await tryReopenModelingProjectIde(page)), MODELING_CH5_REOPEN_SKIP_MSG);
 
     await page.getByTitle("Solver Settings").click();
     await expect(
