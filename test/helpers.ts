@@ -24,7 +24,11 @@ const FILE_EXPLORER_HOTKEY = "Control+Shift+E";
 const PROJECT_SEARCH_HOTKEY = "Control+Shift+F";
 
 export async function navigateToHomeProjects(page: Page): Promise<void> {
-  await gotoWithRetry(page, absUrl("/"), { waitUntil: "domcontentloaded" });
+  await gotoWithRetry(page, absUrl("/"), {
+    waitUntil: "domcontentloaded",
+    attempts: 6,
+    backoffMs: 2_000,
+  });
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible({ timeout: 30_000 });
 }
 
@@ -101,6 +105,70 @@ export function projectsTableDataRowsInTabPanel(panel: Locator): Locator {
 }
 
 /**
+ * 等待 **`useProjects()`** 列表渲染完成后再数行。
+ * - 有行：连续 2 次相同且 >0 即返回。
+ * - 无行：须等待至少 8s 且连续 4 次为 0，避免 SWR 首帧 0 行误判。
+ */
+export async function countProjectsTableRowsWhenReady(
+  panel: Locator,
+  options?: { timeoutMs?: number },
+): Promise<number> {
+  const timeoutMs = options?.timeoutMs ?? 90_000;
+  const minMsBeforeEmpty = 8_000;
+  await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
+  await panel.getByPlaceholder("Search projects...").fill("");
+
+  const startedAt = Date.now();
+  const state = { last: -1, stable: 0 };
+  let resolved = 0;
+  await expect
+    .poll(
+      async () => {
+        const count = await projectsTableDataRowsInTabPanel(panel).count();
+        if (count === state.last) {
+          state.stable += 1;
+        } else {
+          state.last = count;
+          state.stable = 1;
+        }
+
+        if (count > 0 && state.stable >= 2) {
+          resolved = count;
+          return "ready";
+        }
+
+        const elapsed = Date.now() - startedAt;
+        if (count === 0 && elapsed >= minMsBeforeEmpty && state.stable >= 4) {
+          resolved = 0;
+          return "ready";
+        }
+
+        return "loading";
+      },
+      { timeout: timeoutMs, intervals: [400, 600, 800, 1_000, 1_500] },
+    )
+    .toBe("ready");
+  return resolved;
+}
+
+/** **`My Projects`** 至少 1 行；超时仍无行则抛错（13.1 捕获后 skip）。 */
+export async function waitForMyProjectsTableRows(panel: Locator, timeoutMs = 90_000): Promise<number> {
+  await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
+  await panel.getByPlaceholder("Search projects...").fill("");
+  let count = 0;
+  await expect
+    .poll(
+      async () => {
+        count = await projectsTableDataRowsInTabPanel(panel).count();
+        return count;
+      },
+      { timeout: timeoutMs, intervals: [400, 800, 1_200, 2_000] },
+    )
+    .toBeGreaterThan(0);
+  return count;
+}
+
+/**
  * 在工作台 **`/`** Projects：**My Projects** 下对当前列表中的 **全部自有项目** 循环执行：
  * **全选 → Archive → 确认**，再在 **Archived Projects** 中对 **全部已归档行** **全选 → Delete → 确认**（永久删除）。
  *
@@ -116,10 +184,7 @@ export async function bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage
 
     await page.getByRole("tab", { name: "My Projects" }).click();
     const myPanel = projectsTabPanel(page, "My Projects");
-    // 空列表时 table-body 可能被样式隐藏，勿对 tbody 断言 visible；以搜索框就绪代表面板可交互。
-    await expect(myPanel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
-    await myPanel.getByPlaceholder("Search projects...").fill("");
-    const nMyStart = await projectsTableDataRowsInTabPanel(myPanel).count();
+    const nMyStart = await countProjectsTableRowsWhenReady(myPanel);
 
     if (nMyStart > 0) {
       await myPanel.getByRole("checkbox", { name: "Select all projects" }).click();
@@ -145,7 +210,7 @@ export async function bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage
         .toBeGreaterThan(0);
     }
 
-    const nArch = await projectsTableDataRowsInTabPanel(archivedPanel).count();
+    const nArch = await countProjectsTableRowsWhenReady(archivedPanel);
 
     if (nArch > 0) {
       await archivedPanel.getByRole("checkbox", { name: "Select all projects" }).click();
@@ -163,20 +228,19 @@ export async function bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage
     // 用回合结束时的真实行数判断「是否已清空」，勿用本轮开头的 nMyStart（首帧 0 行会误判并提前 return）
     await page.getByRole("tab", { name: "My Projects" }).click();
     const myPanelEnd = projectsTabPanel(page, "My Projects");
-    await myPanelEnd.getByPlaceholder("Search projects...").fill("");
-    const nMyEnd = await projectsTableDataRowsInTabPanel(myPanelEnd).count();
+    const nMyEnd = await countProjectsTableRowsWhenReady(myPanelEnd);
     await page.getByRole("tab", { name: "Archived Projects" }).click();
     const archivedPanelEnd = projectsTabPanel(page, "Archived Projects");
-    await archivedPanelEnd.getByPlaceholder("Search projects...").fill("");
-    const nArchEnd = await projectsTableDataRowsInTabPanel(archivedPanelEnd).count();
+    const nArchEnd = await countProjectsTableRowsWhenReady(archivedPanelEnd);
     if (nMyEnd === 0 && nArchEnd === 0) {
+      await page.getByRole("tab", { name: "My Projects" }).click();
       return;
     }
   }
 
   await navigateToHomeProjects(page);
   await page.getByRole("tab", { name: "My Projects" }).click();
-  const left = await projectsTableDataRowsInTabPanel(projectsTabPanel(page, "My Projects")).count();
+  const left = await countProjectsTableRowsWhenReady(projectsTabPanel(page, "My Projects"));
   if (left > 0) {
     throw new Error(
       `bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage: 经过 ${maxPasses} 轮后 My Projects 仍有 ${left} 行；请检查归档/删除确认框或列表筛选状态。`,

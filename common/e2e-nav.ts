@@ -48,6 +48,37 @@ export async function gotoWithRetry(
   throw lastError;
 }
 
+type ReloadOptions = NonNullable<Parameters<Page["reload"]>[0]>;
+type ReloadWithRetryOptions = ReloadOptions & {
+  attempts?: number;
+  backoffMs?: number;
+};
+
+/** 对 `page.reload` 做有限次重试，行为与 {@link gotoWithRetry} 一致。 */
+export async function reloadWithRetry(page: Page, options?: ReloadWithRetryOptions): Promise<Response | null> {
+  const { attempts = 4, backoffMs = 1500, ...reloadOptions } = options ?? {};
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await page.reload(reloadOptions);
+      if (res && res.status() >= 500 && attempt < attempts - 1) {
+        await page.waitForTimeout(backoffMs * (attempt + 1));
+        continue;
+      }
+      return res;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientNavigationError(error) || attempt === attempts - 1) {
+        throw error;
+      }
+      await page.waitForTimeout(backoffMs * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
 type WaitForURLOptions = NonNullable<Parameters<Page["waitForURL"]>[1]>;
 type WaitForURLWithRetryOptions = WaitForURLOptions & {
   attempts?: number;

@@ -4,10 +4,12 @@ import { absUrl } from "../common/global-setup";
 
 import {
   bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage,
+  countProjectsTableRowsWhenReady,
   navigateToHomeProjects,
   projectsListBatchToolbar,
   projectsTabPanel,
   projectsTableDataRowsInTabPanel,
+  waitForMyProjectsTableRows,
 } from "./helpers";
 
 /**
@@ -31,23 +33,6 @@ async function projectDisplayNameFromListRow(row: Locator): Promise<string> {
     }
   }
   return "";
-}
-
-/** 等待 **My Projects** 面板内项目列表加载完成（`useProjects()` 异步；首帧 `count()` 常为 0）。 */
-async function waitForMyProjectsTableRows(panel: Locator, timeoutMs = 90_000): Promise<number> {
-  await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
-  await panel.getByPlaceholder("Search projects...").fill("");
-  let count = 0;
-  await expect
-    .poll(
-      async () => {
-        count = await projectsTableDataRowsInTabPanel(panel).count();
-        return count;
-      },
-      { timeout: timeoutMs, intervals: [400, 800, 1_200, 2_000] },
-    )
-    .toBeGreaterThan(0);
-  return count;
 }
 
 test.describe("13. 项目列表查看及管理", () => {
@@ -159,18 +144,17 @@ test.describe("13. 项目列表查看及管理", () => {
   });
 
   test("13.2 删除MyProjects所有项目", async ({ page }) => {
+    test.setTimeout(600_000);
     await test.step("My Projects：全选 → Archive → 确认（若有）→ Archived：全选 → Delete → 确认", async () => {
       await bulkArchiveAndPermanentlyDeleteAllMyProjectsOnProjectsPage(page);
     });
 
     await test.step("My Projects：列表无数据行", async () => {
-      await navigateToHomeProjects(page);
+      // bulkArchive 已在 `/` 上切换 My Projects 并 count=0；勿再 goto/reload（iipe 删除后 updateProjectsCache 已更新 SWR，且 WSL→beta 易 ERR_CONNECTION_CLOSED）。
       await page.getByRole("tab", { name: "My Projects" }).click();
       const panel = projectsTabPanel(page, "My Projects");
-      await expect(panel.getByPlaceholder("Search projects...")).toBeVisible({ timeout: 30_000 });
-      await panel.getByPlaceholder("Search projects...").fill("");
-      // 无项目时 table-body 可能 hidden；只断言数据行数为 0（已是空则本步通过，不报错）
-      await expect(projectsTableDataRowsInTabPanel(panel)).toHaveCount(0, { timeout: 30_000 });
+      const left = await countProjectsTableRowsWhenReady(panel);
+      expect(left).toBe(0);
     });
   });
 });
