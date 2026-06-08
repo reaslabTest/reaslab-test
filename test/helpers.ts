@@ -2413,18 +2413,3 @@ export async function openLeafFile(page: Page, segments: readonly string[]): Pro
   await expect(fileNode).toBeVisible({ timeout: 20_000 });
   await fileNode.click();
 }
-
-
-/** 项目 IDE **Explore** 根目录新建文件（与 **`15-reaslingo-home`** 文件树交互一致）。 */
-export async function createProjectIdeRootFile(page: Page, fileName: string): Promise<void> {
-  await page.getByTitle("Create New File").first().click();
-  const input = page.locator('[data-filetree-node="true"] input').first();
-  await expect(input).toBeVisible({ timeout: 15_000 });
-  await input.fill(fileName);
-  await input.press("Enter");
-  const tree = page.locator(".ide-filetree").filter({ visible: true }).first();
-  const escaped = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  await expect(tree.getByRole("row", { name: new RegExp(escaped, "i") }).first()).toBeVisible({
-    timeout: 60_000,
-  });
-}

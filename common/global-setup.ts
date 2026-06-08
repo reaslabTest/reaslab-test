@@ -160,7 +160,27 @@ async function loginAndSaveState(): Promise<void> {
   await browser.close();
 }
 
+function hasReusableStorageState(): boolean {
+  if (process.env.E2E_REUSE_AUTH !== "1") {
+    return false;
+  }
+  if (!existsSync(STORAGE_STATE_PATH)) {
+    return false;
+  }
+  try {
+    return statSync(STORAGE_STATE_PATH).size > 80;
+  } catch {
+    return false;
+  }
+}
+
 async function globalSetup(_config: FullConfig): Promise<void> {
+  if (hasReusableStorageState()) {
+    console.info(
+      `[global-setup] E2E_REUSE_AUTH=1：跳过登录，复用 ${STORAGE_STATE_PATH}`,
+    );
+    return;
+  }
   await loginAndSaveState();
 }
 

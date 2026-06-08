@@ -45,6 +45,10 @@
     "test:18:headed": "playwright test --config common/playwright.config.ts test/18-new-project.test.ts --headed",
     "test:19": "playwright test --config common/playwright.config.ts test/19-project-list-actions.test.ts",
     "test:19:headed": "playwright test --config common/playwright.config.ts test/19-project-list-actions.test.ts --headed",
+    "test:20": "playwright test --config common/playwright.config.ts test/20-project-edit-page.test.ts",
+    "test:20:headed": "playwright test --config common/playwright.config.ts test/20-project-edit-page.test.ts --headed",
+    "test:20:local:headed": "E2E_BASE_URL=http://127.0.0.1:3000 playwright test --config common/playwright.config.ts test/20-project-edit-page.test.ts --headed",
+    "test:20:reuse-auth:headed": "E2E_REUSE_AUTH=1 playwright test --config common/playwright.config.ts test/20-project-edit-page.test.ts --headed",
 
     "reaslab-test": "node run.mjs --scope-file=common/run-scope-beta.txt",
 
