@@ -21,6 +21,7 @@ import {
   dismissEditorFloatingPanels,
   exerciseEditorToolbarCommandPalette,
   exerciseEditorToolbarEyeLean,
+  exerciseEditorToolbarLeanCodeLenses,
   exerciseEditorToolbarEyeMarkdown,
   exerciseEditorToolbarEyeTex,
   exerciseEditorToolbarFileSearch,
@@ -61,6 +62,7 @@ const TEX_PRESENT: EditorToolbarIcon[] = [
 const MD_PRESENT: EditorToolbarIcon[] = ["eye", "undo", "redo", "command", "file-search"];
 const LEAN_PRESENT: EditorToolbarIcon[] = [
   "eye",
+  "captions",
   "undo",
   "redo",
   "message-circle",
@@ -162,9 +164,10 @@ test.describe("16. 文件编辑的快捷操作栏", () => {
       await dismissEditorFloatingPanels(page);
     });
 
-    await test.step(".lean：图标 + Eye 冒烟（Modeling 无 Infoview）/ Undo / --注释 / Command / 查找 / Ω", async () => {
+    await test.step(".lean：图标 + Eye / Code Lenses 冒烟（Modeling 无 Infoview）/ Undo / --注释 / Command / 查找 / Ω", async () => {
       await openFileAndAssertToolbar(page, /e2e-toolbar-sample\.lean/i, [...LEAN_PRESENT], ["play", "type"]);
       await exerciseEditorToolbarEyeLean(page);
+      await exerciseEditorToolbarLeanCodeLenses(page);
       await exerciseEditorToolbarUndoRedo(page);
       expect(
         await exerciseEditorToolbarToggleComment(page, {

@@ -60,6 +60,7 @@ export function visibleEditorToolbar(page: Page): Locator {
 export type EditorToolbarIcon =
   | "play"
   | "eye"
+  | "captions"
   | "undo"
   | "redo"
   | "message-circle"
@@ -69,6 +70,10 @@ export type EditorToolbarIcon =
   | "omega";
 
 function editorToolbarIconLocator(toolbar: Locator, page: Page, icon: EditorToolbarIcon): Locator {
+  // `toggle-lean-code-lenses`：`Toggle` + `aria-label`（Show/Hide Code Lenses），非 `TooltipIconButton`。
+  if (icon === "captions") {
+    return toolbar.getByRole("button", { name: /Code Lenses/i });
+  }
   return toolbar.locator("button").filter({
     has: page.locator(`svg.lucide-${icon}, svg[class*='lucide-${icon}']`),
   });
@@ -283,6 +288,17 @@ export async function exerciseEditorToolbarEyeMarkdown(page: Page): Promise<void
  * **`usePreviewPanel`** 对 **`.lean`** 直接返回 **null**（`sidebar.tsx`），故 **无** `.ide-infoview`。
  * 默认仅 **Eye** 冒烟点击；完整 Infoview 见 **§8.2**（定理证明项目）。
  */
+/** **Code Lenses（Lean）**：`toggle-lean-code-lenses` 为 `Toggle`；冒烟切换一次。 */
+export async function exerciseEditorToolbarLeanCodeLenses(page: Page): Promise<void> {
+  await prepareActiveEditorWithContent(page, /#eval/i);
+  await dismissEditorFloatingPanels(page);
+  const btn = editorToolbarIconLocator(visibleEditorToolbar(page), page, "captions");
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click();
+  await page.waitForTimeout(300);
+  await btn.click();
+}
+
 export async function exerciseEditorToolbarEyeLean(
   page: Page,
   options?: { expectInfoviewPanel?: boolean },

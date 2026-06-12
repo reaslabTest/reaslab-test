@@ -1,12 +1,22 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { expect, type Locator, type Page } from "@playwright/test";
 
 import { gotoWithRetry } from "../common/e2e-nav";
 import { absUrl } from "../common/global-setup";
 
+const MARKETING_HOME_NAV_OPTIONS = {
+  waitUntil: "domcontentloaded" as const,
+  timeout: 120_000,
+  attempts: 6,
+  backoffMs: 2_000,
+};
+
 async function gotoMarketingHome(page: Page): Promise<void> {
-  let res = await gotoWithRetry(page, absUrl("/home"), { waitUntil: "domcontentloaded" });
+  let res = await gotoWithRetry(page, absUrl("/home"), MARKETING_HOME_NAV_OPTIONS);
   if (!res?.ok()) {
-    res = await gotoWithRetry(page, absUrl("/"), { waitUntil: "domcontentloaded" });
+    res = await gotoWithRetry(page, absUrl("/"), MARKETING_HOME_NAV_OPTIONS);
   }
   expect(res?.ok(), `首屏导航状态 ${res?.status()}`).toBeTruthy();
 }
@@ -38,16 +48,42 @@ export async function openGlobalReasLingoFromHome(page: Page): Promise<void> {
   await gotoMarketingHome(page);
   const link = page.locator("header").locator('a[href="/reaslingo"]').first();
   await expect(link).toBeVisible({ timeout: 60_000 });
-  await gotoWithRetry(page, absUrl("/reaslingo"), {
-    waitUntil: "domcontentloaded",
-    timeout: 120_000,
-  });
+  // 场景 §15.1：点击顶栏 ReasLingo（比直接 goto 更贴近用户路径，且减少 ERR_ABORTED）
+  await link.click();
+  try {
+    await expect(page).toHaveURL(/\/reaslingo(?:\/|\?|$)/, { timeout: 45_000 });
+  } catch {
+    await gotoWithRetry(page, absUrl("/reaslingo"), {
+      waitUntil: "domcontentloaded",
+      timeout: 120_000,
+      attempts: 6,
+      backoffMs: 2_000,
+    });
+  }
   await expect(page.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 120_000 });
   await expect(ideAgentHeader(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTitle("Send Message").first()).toBeVisible({ timeout: 30_000 });
   await ensureIdeAgentWelcomeScreen(page);
   await ensureIdeAgentRightPanelOpen(page);
   await expect(page.getByText("Activity", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+}
+
+function isOnReasLingoUrl(page: Page): boolean {
+  return /\/reaslingo(?:\/|\?|$)/.test(page.url());
+}
+
+/**
+ * 已在 `/reaslingo` 时仅校验 IdeAgent 壳层；否则走 §15.1 完整首页导航。
+ * 供 §15 串行用例在 15.1 通过后复用同一 `page`。
+ */
+export async function ensureIdeAgentOnReasLingo(page: Page): Promise<void> {
+  if (!isOnReasLingoUrl(page)) {
+    await openGlobalReasLingoFromHome(page);
+    return;
+  }
+  await expect(page.getByPlaceholder("Search conversations...")).toBeVisible({ timeout: 60_000 });
+  await expect(ideAgentHeader(page)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTitle("Send Message").first()).toBeVisible({ timeout: 30_000 });
 }
 
 export function ideAgentShell(page: Page): Locator {
@@ -81,14 +117,57 @@ async function isFileTreeToolbarVisible(page: Page): Promise<boolean> {
     .catch(() => false);
 }
 
+/** `toolbarToggleButtonClass(active)`：`border-indigo` / `bg-sidebar-accent` 表示该侧栏已展开。 */
+async function isIdeAgentSideToggleActive(toggle: Locator): Promise<boolean> {
+  return toggle
+    .evaluate((el) => /border-indigo|bg-sidebar-accent/.test(el.className))
+    .catch(() => false);
+}
+
 async function ensureIdeAgentRightPanelOpen(page: Page): Promise<void> {
   if (await rightPanelHeader(page).isVisible().catch(() => false)) {
     return;
   }
-  const headerToggle = ideAgentHeader(page).getByTitle("Toggle Right Panel");
-  await expect(headerToggle).toBeVisible({ timeout: 30_000 });
-  await headerToggle.click();
+  const showToggle = ideAgentHeader(page).getByTitle("Show Right Panel");
+  await expect(showToggle).toBeVisible({ timeout: 30_000 });
+  await showToggle.click();
   await expect(rightPanelHeader(page)).toBeVisible({ timeout: 30_000 });
+}
+
+/** 右栏壳层（`right-panel.tsx` 根 `border-l`）；与 §19 `agentRightPanel` 同思路。 */
+function ideAgentRightPanelShell(page: Page): Locator {
+  return rightPanelHeader(page).locator("xpath=ancestor::div[contains(@class,'border-l')][1]");
+}
+
+async function isIdeAgentEditorMounted(page: Page): Promise<boolean> {
+  if ((await page.locator("[data-filetree-scroll]").count()) > 0) {
+    return true;
+  }
+  if ((await page.getByPlaceholder("Enter to search").count()) > 0) {
+    return true;
+  }
+  return (await ideAgentSideToolbar(page).count()) > 0;
+}
+
+/** IdeAgentEditor 仅在右栏 **Files** 标签下挂载；默认常在 **Activity**。 */
+async function ensureIdeAgentEditorTab(page: Page): Promise<void> {
+  if (await isIdeAgentEditorMounted(page)) {
+    return;
+  }
+  const filesTab = page.getByRole("button", { name: "Files", exact: true });
+  if (await filesTab.isVisible().catch(() => false)) {
+    await filesTab.click();
+  } else {
+    const openFileTab = rightPanelHeader(page).locator("button[type='button']").filter({
+      hasNot: page.getByText("Activity", { exact: true }),
+    });
+    if ((await openFileTab.count()) > 0) {
+      await openFileTab.first().click();
+    }
+  }
+  await expect
+    .poll(async () => isIdeAgentEditorMounted(page), { timeout: 30_000, intervals: [200, 400, 800] })
+    .toBe(true);
 }
 
 export async function ensureIdeAgentFilesPanel(page: Page): Promise<void> {
@@ -98,23 +177,197 @@ export async function ensureIdeAgentFilesPanel(page: Page): Promise<void> {
     return;
   }
 
+  await ensureIdeAgentEditorTab(page);
+
+  // jotai 持久化 `sidePanel=filetree` 时，切到 Files 标签后树已可见，无需再点内侧切换钮。
+  if (await fileTreeScrollHost(page).isVisible().catch(() => false)) {
+    await expect(page.getByTitle("Create New File").first()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
   const filesToggle = ideAgentFilesToggle(page);
-  if (await filesToggle.isVisible().catch(() => false)) {
+  await expect(filesToggle).toBeVisible({ timeout: 15_000 });
+  const toggleActive = await isIdeAgentSideToggleActive(filesToggle);
+  // 已 active 时勿再点 Files 钮——`toggleFileTree` 会在 filetree ↔ null 间切换并折叠侧栏。
+  if (!toggleActive) {
     await filesToggle.click();
-  } else {
-    const openFileTab = rightPanelHeader(page).locator("button[type='button']").filter({
-      hasNot: page.getByText("Activity", { exact: true }),
-    });
-    if ((await openFileTab.count()) > 0) {
-      await openFileTab.first().click();
-    }
   }
 
   await expect(page.getByTitle("Create New File").first()).toBeVisible({ timeout: 60_000 });
 }
 
+type FileTreeNodeKind = "file" | "directory" | "any";
+
+/** 从 pathname 或裸 basename 取出文件树节点的 `data-node-basename`。 */
+function fileTreeBasename(nameOrPath: string): string {
+  const trimmed = nameOrPath.replace(/^\/+/, "");
+  const segments = trimmed.split("/").filter(Boolean);
+  return segments.at(-1) ?? trimmed;
+}
+
+/** gRPC / 文件树 `data-node-pathname`，如 `/my-dir/file.txt`。 */
+function fileTreePathname(...segments: string[]): string {
+  return `/${segments.map((s) => fileTreeBasename(s)).filter(Boolean).join("/")}`;
+}
+
+/** 文件夹内文件（按完整 pathname，避免历史残留同名文件干扰 `.first()`）。 */
+export function fileTreeFileInFolder(
+  page: Page,
+  folderBasename: string,
+  fileBasename: string,
+): Locator {
+  const pathname = fileTreePathname(folderBasename, fileBasename);
+  return fileTreeScrollHost(page)
+    .locator(`[data-node-type="file"][data-node-pathname="${pathname}"]`)
+    .first();
+}
+
+function fileTreeNodeByBasename(page: Page, basename: string, kind: FileTreeNodeKind = "any"): Locator {
+  const base = fileTreeBasename(basename);
+  const host = fileTreeScrollHost(page);
+  if (kind === "file") {
+    return host.locator(`[data-node-basename="${base}"][data-node-type="file"]`).first();
+  }
+  if (kind === "directory") {
+    return host.locator(`[data-node-basename="${base}"][data-node-type="directory"]`).first();
+  }
+  return host.locator(`[data-node-basename="${base}"]`).first();
+}
+
+/** 按 `data-node-basename` 精确定位，避免 `pathname*=` 误命中历史目录或子路径。 */
 export function fileTreeNode(page: Page, basename: string): Locator {
-  return page.locator(`[data-node-pathname*="${basename}"]`).first();
+  return fileTreeNodeByBasename(page, basename, "file");
+}
+
+/** 文件树中的文件夹节点（`data-node-type="directory"`）。 */
+export function fileTreeFolderNode(page: Page, folderBasename: string): Locator {
+  return fileTreeNodeByBasename(page, folderBasename, "directory");
+}
+
+export async function ensureFileTreeFolderExpanded(page: Page, folderBasename: string): Promise<void> {
+  const folder = fileTreeFolderNode(page, folderBasename);
+  await expect(folder).toBeVisible({ timeout: 60_000 });
+  await folder.scrollIntoViewIfNeeded();
+
+  const chevron = folder.locator("[data-tree-chevron]").first();
+  if ((await chevron.count()) === 0) {
+    return;
+  }
+
+  const chevronIcon = chevron.locator("span").first();
+  if (await chevronIcon.evaluate((el) => el.classList.contains("rotate-90")).catch(() => false)) {
+    return;
+  }
+
+  await chevron.click();
+  await expect(chevronIcon).toHaveClass(/rotate-90/, { timeout: 15_000 });
+}
+
+export async function clickFileTreeFolder(page: Page, folderBasename: string): Promise<void> {
+  await ensureIdeAgentFilesPanel(page);
+  const node = fileTreeFolderNode(page, folderBasename);
+  await expect(node).toBeVisible({ timeout: 60_000 });
+  await node.scrollIntoViewIfNeeded();
+  await node.click({ timeout: 30_000 });
+  await ensureFileTreeFolderExpanded(page, folderBasename);
+}
+
+/** §15 E2E 在全局工作区根下创建的目录前缀；失败重跑会累积，需用例前后清扫。 */
+export const CH15_E2E_DIR_PREFIX = "e2e-ch15-dir-";
+
+const CH15_E2E_DIR_NAME_PATTERN = /^e2e-ch15-dir-\d+$/;
+
+function fileTreeScrollHost(page: Page): Locator {
+  return page.locator("[data-filetree-scroll]");
+}
+
+async function listCh15E2eFolderNames(page: Page): Promise<string[]> {
+  const nodes = fileTreeScrollHost(page).locator(
+    `[data-node-type="directory"][data-node-basename^="${CH15_E2E_DIR_PREFIX}"]`,
+  );
+  const count = await nodes.count();
+  const names = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    const basename = await nodes.nth(i).getAttribute("data-node-basename");
+    if (basename && CH15_E2E_DIR_NAME_PATTERN.test(basename)) {
+      names.add(basename);
+    }
+  }
+  return [...names].sort();
+}
+
+export type CleanupCh15E2eOptions = {
+  /** 单次清扫最多删除多少个目录。 */
+  maxFolders?: number;
+  /** 总时间预算（ms），防止历史过多时阻塞用例。 */
+  timeBudgetMs?: number;
+  /** 为 true 时若仍有残留则断言失败。 */
+  requireEmpty?: boolean;
+};
+
+export async function confirmDeleteFileTreeDialog(page: Page): Promise<void> {
+  const deleteDialog = page.locator('[data-slot="alert-dialog-content"]').filter({
+    hasText: /Are you sure you want to delete/i,
+  });
+  await expect(deleteDialog).toBeVisible({ timeout: 20_000 });
+  await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(deleteDialog).toBeHidden({ timeout: 60_000 });
+}
+
+/** 删除文件树中的文件夹（含其下文件）。 */
+export async function deleteFileTreeFolder(page: Page, folderBasename: string): Promise<void> {
+  await ensureIdeAgentFilesPanel(page);
+  const node = fileTreeFolderNode(page, folderBasename);
+  if ((await node.count().catch(() => 0)) === 0) {
+    return;
+  }
+  await expect(node).toBeVisible({ timeout: 15_000 });
+  await node.scrollIntoViewIfNeeded();
+  await node.click({ button: "right", timeout: 15_000 });
+  await expect(fileTreeContextMenu(page)).toBeVisible({ timeout: 10_000 });
+  await fileTreeContextMenuItem(page, "Delete").click();
+  await confirmDeleteFileTreeDialog(page);
+  await expect(fileTreeFolderNode(page, folderBasename)).toHaveCount(0, { timeout: 60_000 });
+}
+
+/**
+ * 清理全局工作区中历次 §15.2 残留的 `e2e-ch15-dir-*` 目录。
+ * 在 15.2 开始前/结束后调用，避免文件树与项目搜索被历史数据拖慢。
+ */
+export async function cleanupCh15E2eArtifacts(
+  page: Page,
+  options: CleanupCh15E2eOptions = {},
+): Promise<void> {
+  const { maxFolders = 80, timeBudgetMs = 240_000, requireEmpty = false } = options;
+  await ensureIdeAgentFilesPanel(page);
+
+  const deadline = Date.now() + timeBudgetMs;
+  const skipped = new Set<string>();
+
+  for (let i = 0; i < maxFolders && Date.now() < deadline; i++) {
+    const folders = (await listCh15E2eFolderNames(page)).filter((name) => !skipped.has(name));
+    if (folders.length === 0) {
+      break;
+    }
+    const target = folders[folders.length - 1]!;
+    try {
+      await deleteFileTreeFolder(page, target);
+    } catch {
+      skipped.add(target);
+      if (skipped.size >= folders.length) {
+        break;
+      }
+    }
+  }
+
+  if (!requireEmpty) {
+    return;
+  }
+  const remaining = await listCh15E2eFolderNames(page);
+  expect(
+    remaining,
+    `仍有 ${remaining.length} 个 §15 E2E 目录未清理：${remaining.slice(0, 5).join(", ")}${remaining.length > 5 ? "…" : ""}`,
+  ).toHaveLength(0);
 }
 
 export function chatsLeftPanel(page: Page): Locator {
@@ -140,36 +393,60 @@ export async function createTreeNode(
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.fill(name);
   await input.press("Enter");
-  await expect(fileTreeNode(page, name)).toBeVisible({ timeout: 60_000 });
-}
-
-/** 项目 IDE / IdeAgent **Explore** 根目录新建文件（与 **`createTreeNode`** 一致）。 */
-export async function createProjectIdeRootFile(page: Page, fileName: string): Promise<void> {
-  await createTreeNode(page, "Create New File", fileName);
+  const kind: FileTreeNodeKind = title === "Create new folder" ? "directory" : "file";
+  await expect(fileTreeNodeByBasename(page, name, kind)).toBeVisible({ timeout: 60_000 });
 }
 
 function fileTreeRenameInput(page: Page): Locator {
   return page.locator("[data-filetree-scroll]").getByRole("textbox").last();
 }
 
-export async function renameFileTreeNode(page: Page, basename: string, newName: string): Promise<void> {
-  await fileTreeNode(page, basename).click({ button: "right" });
+export async function renameFileTreeNode(
+  page: Page,
+  basename: string,
+  newName: string,
+  options?: { parentFolderBasename?: string },
+): Promise<void> {
+  const { parentFolderBasename } = options ?? {};
+  if (parentFolderBasename) {
+    await ensureFileTreeFolderExpanded(page, parentFolderBasename);
+  }
+
+  const node = parentFolderBasename
+    ? fileTreeFileInFolder(page, parentFolderBasename, basename)
+    : fileTreeNode(page, basename);
+  await expect(node).toBeVisible({ timeout: 30_000 });
+  await node.scrollIntoViewIfNeeded();
+  await node.click({ button: "right" });
   await expect(fileTreeContextMenu(page)).toBeVisible({ timeout: 10_000 });
   await fileTreeContextMenuItem(page, "Rename").click();
   const renameInput = fileTreeRenameInput(page);
   await expect(renameInput).toBeVisible({ timeout: 10_000 });
   await renameInput.fill(newName);
   await renameInput.press("Enter");
-  await expect(fileTreeNode(page, newName)).toBeVisible({ timeout: 60_000 });
+
+  const renamedNode = parentFolderBasename
+    ? fileTreeFileInFolder(page, parentFolderBasename, newName)
+    : fileTreeNode(page, newName);
+  await expect(renamedNode).toBeVisible({ timeout: 60_000 });
+}
+
+/**
+ * `editor.tsx` L138–157：Files/Search 切换钮在 `IdeAgentEditor` 顶栏，与 `ResizablePanel#ide-agent-side` **平级**。
+ * 从 `#ide-agent-side` 往上 xpath 找不到该工具栏；须从右栏 `border-l` 壳层定位。
+ */
+function ideAgentEditorColumn(page: Page): Locator {
+  return ideAgentRightPanelShell(page).locator("div.flex.min-h-0.flex-1.flex-col").first();
 }
 
 function ideAgentSideToolbar(page: Page): Locator {
-  return page
+  return ideAgentRightPanelShell(page)
     .locator("div.flex.h-8.shrink-0.items-center.border-b")
     .locator('div[class*="gap-0.5"]')
     .first();
 }
 
+/** `editor.tsx` L144–155：Files 为第一个 `TooltipIconButton`（lucide 0.575 的 svg 无 `lucide-*` class）。 */
 function ideAgentFilesToggle(page: Page): Locator {
   return ideAgentSideToolbar(page).locator("button").nth(0);
 }
@@ -178,29 +455,69 @@ function ideAgentSearchToggle(page: Page): Locator {
   return ideAgentSideToolbar(page).locator("button").nth(1);
 }
 
-async function openIdeAgentGlobalSearch(page: Page): Promise<void> {
-  const searchToggle = ideAgentSearchToggle(page);
-  await expect(searchToggle).toBeVisible({ timeout: 15_000 });
-  await searchToggle.click();
-  const searchInput = page.getByPlaceholder("Enter to search");
-  if (!(await searchInput.isVisible().catch(() => false))) {
-    await searchToggle.click();
-  }
-  await expect(searchInput).toBeVisible({ timeout: 15_000 });
-}
-
 function ideAgentSearchPanel(page: Page): Locator {
-  const searchInput = page.getByPlaceholder("Enter to search");
-  return page
+  // `GlobalSearchPanel`：`h3` Search + `placeholder="Enter to search"`（`type=text` → role textbox，非 searchbox）
+  return ideAgentEditorColumn(page)
     .locator("div.flex.min-h-0.flex-col")
-    .filter({ has: searchInput })
     .filter({ has: page.getByRole("heading", { name: "Search", exact: true }) })
+    .filter({ has: page.getByPlaceholder("Enter to search") })
     .first();
 }
 
-async function waitForIdeAgentSearchHits(panel: Locator, timeoutMs = 90_000): Promise<void> {
+function ideAgentSearchInput(panel: Locator): Locator {
+  return panel.getByPlaceholder("Enter to search");
+}
+
+async function openIdeAgentGlobalSearch(page: Page): Promise<void> {
+  await ensureIdeAgentRightPanelOpen(page);
+  await ensureIdeAgentEditorTab(page);
+
+  const searchInput = page.getByPlaceholder("Enter to search");
+  if (await searchInput.isVisible().catch(() => false)) {
+    return;
+  }
+
+  const toolbar = ideAgentSideToolbar(page);
+  await expect(toolbar).toBeVisible({ timeout: 15_000 });
+  const searchToggle = toolbar.locator("button").nth(1);
+  await expect(searchToggle).toBeVisible({ timeout: 15_000 });
+  const toggleActive = await isIdeAgentSideToggleActive(searchToggle);
+  if (!toggleActive) {
+    await searchToggle.click();
+  }
+  // Search 为 toggle：已 active 时勿再点（会关掉面板）；输入框未识别时只等待展开。
+  await expect(searchInput).toBeVisible({ timeout: 15_000 });
+}
+
+/**
+ * React 受控 `<input value={query} onChange=…>`：`fill()` 常不更新 jotai，`search()` 见空 pattern 直接 return。
+ * `search-input.tsx` 右侧 `absolute top-1/2 right-2` 的 Aa/ab/* 钮叠在 input 上，`click()` 会被拦截。
+ */
+async function syncControlledSearchPattern(searchInput: Locator, query: string): Promise<void> {
+  await searchInput.evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    input.focus();
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    descriptor?.set?.call(input, value);
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
+  }, query);
+  await expect(searchInput).toHaveValue(query, { timeout: 5_000 });
+}
+
+async function waitForIdeAgentSearchHits(
+  panel: Locator,
+  timeoutMs = 90_000,
+  query?: string,
+  fileBasename?: string,
+): Promise<void> {
   const summary = panel.getByText(/[1-9]\d* results? in \d+ files?/i);
   const searching = panel.getByText("Searching...");
+  const fileResultRow = fileBasename
+    ? panel.locator("span.truncate.text-xs").filter({ hasText: fileBasename })
+    : panel.locator("span.truncate.text-xs").first();
+  const matchLine = query
+    ? panel.locator("pre").filter({ hasText: query }).first()
+    : panel.locator("pre").first();
   await expect
     .poll(
       async () => {
@@ -210,6 +527,20 @@ async function waitForIdeAgentSearchHits(panel: Locator, timeoutMs = 90_000): Pr
         if ((await summary.count()) > 0 && (await summary.first().isVisible().catch(() => false))) {
           return "ready";
         }
+        if (
+          query &&
+          (await matchLine.count()) > 0 &&
+          (await matchLine.isVisible().catch(() => false))
+        ) {
+          return "ready";
+        }
+        if (
+          fileBasename &&
+          (await fileResultRow.count()) > 0 &&
+          (await fileResultRow.first().isVisible().catch(() => false))
+        ) {
+          return "ready";
+        }
         return "empty";
       },
       { timeout: timeoutMs, intervals: [400, 800, 1_500, 2_500, 4_000] },
@@ -217,47 +548,229 @@ async function waitForIdeAgentSearchHits(panel: Locator, timeoutMs = 90_000): Pr
     .toBe("ready");
 }
 
+/** Loro 协同编辑异步写盘；项目搜索读磁盘。重试间隔覆盖 autosave 防抖（约 3s）与落盘延迟。 */
+const PROJECT_SEARCH_DISK_SYNC_BACKOFF_MS = [3_000, 4_000, 5_000, 6_000, 8_000, 10_000] as const;
+
+type IdeAgentProjectSearchOptions = {
+  timeoutMs?: number;
+};
+
+/** 清空 Include/Exclude 过滤，避免历史 `dir/**` 导致 0 个文件被扫描。 */
+async function clearIdeAgentSearchFileFilters(page: Page): Promise<void> {
+  const panel = ideAgentSearchPanel(page);
+  const trigger = panel.getByText("Files to Include/Exclude", { exact: true });
+  if (!(await trigger.isVisible().catch(() => false))) {
+    return;
+  }
+  const includeInput = panel.locator("#global-search-include-pattern");
+  const excludeInput = panel.locator("#global-search-exclude-pattern");
+  if (!(await includeInput.isVisible().catch(() => false))) {
+    await trigger.click();
+  }
+  for (const input of [includeInput, excludeInput]) {
+    if (await input.isVisible().catch(() => false)) {
+      const value = await input.inputValue();
+      if (value.trim().length > 0) {
+        await syncControlledSearchPattern(input, "");
+      }
+    }
+  }
+}
+
+async function submitIdeAgentSearchQuery(panel: Locator, query: string): Promise<void> {
+  // 右侧 CodeMirror 打开时抢焦点；点 Search 标题再写受控输入框
+  await panel.getByRole("heading", { name: "Search", exact: true }).click();
+  const searchInput = ideAgentSearchInput(panel);
+  await syncControlledSearchPattern(searchInput, query);
+  await searchInput.press("Enter");
+  // 快速 0 结果时 `Searching...` 可能一闪而过；以输入框仍保留 query 作为已提交依据
+  await expect
+    .poll(
+      async () => {
+        if (await panel.getByText("Searching...").isVisible().catch(() => false)) {
+          return "searching";
+        }
+        return (await searchInput.inputValue()) === query ? "submitted" : "pending";
+      },
+      { timeout: 15_000, intervals: [100, 200, 400, 800] },
+    )
+    .not.toBe("pending");
+}
+
+async function runIdeAgentProjectSearch(
+  page: Page,
+  panel: Locator,
+  query: string,
+  perAttemptTimeoutMs: number,
+  fileBasename?: string,
+): Promise<boolean> {
+  await clearIdeAgentSearchFileFilters(page);
+  await submitIdeAgentSearchQuery(panel, query);
+  try {
+    await waitForIdeAgentSearchHits(panel, perAttemptTimeoutMs, query, fileBasename);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `SearchResultLineDisplay`：有 `position` 的行为 `role=button`，点击后 `openTabWithPosition`。 */
+async function clickIdeAgentSearchMatchLine(panel: Locator, query: string, fileBasename: string): Promise<void> {
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedFile = fileBasename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matchButton = panel
+    .getByRole("button")
+    .filter({ has: panel.locator("pre").filter({ hasText: new RegExp(escapedQuery) }) })
+    .first();
+  if ((await matchButton.count()) > 0) {
+    await expect(matchButton).toBeVisible({ timeout: 15_000 });
+    await matchButton.click();
+    return;
+  }
+  const matchPre = panel.locator("pre").filter({ hasText: new RegExp(escapedQuery) }).first();
+  await expect(matchPre).toBeVisible({ timeout: 15_000 });
+  await matchPre.click();
+  const fileRow = panel.locator("span.truncate.text-xs").filter({ hasText: new RegExp(escapedFile) }).first();
+  if ((await fileRow.count()) > 0) {
+    await fileRow.click();
+  }
+}
+
+function perAttemptSearchTimeoutMs(remainingMs: number, attempt: number): number {
+  return Math.min(remainingMs, attempt < 2 ? 30_000 : attempt < 4 ? 45_000 : 60_000);
+}
+
+/**
+ * 失焦编辑器并等待 autosave 防抖，促使 Loro 将编辑刷向服务端/磁盘。
+ * 项目搜索（gRPC `searchInProject`）读磁盘，须待落盘后再搜。
+ */
+export async function blurIdeAgentEditorForAutosave(page: Page, folderBasename: string): Promise<void> {
+  await clickFileTreeFolder(page, folderBasename);
+  await page.waitForTimeout(12_000);
+}
+
+export function ideAgentVisibleEditor(page: Page): Locator {
+  return page.locator(".cm-content").filter({ visible: true }).first();
+}
+
+/** CodeMirror + Loro：`pressSequentially` 易与协同抢写丢字；`insertText` 一次性写入。 */
+export async function fillIdeAgentEditorText(page: Page, text: string): Promise<void> {
+  const editor = ideAgentVisibleEditor(page);
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.insertText(text);
+  await expect
+    .poll(async () => (await editor.innerText()).includes(text), {
+      timeout: 15_000,
+      intervals: [200, 400, 800, 1_200],
+    })
+    .toBe(true);
+}
+
+/** 重命名/编辑后：重新打开文件、必要时修正正文、Ctrl+S、失焦落盘。 */
+export async function saveIdeAgentFileInFolderAndFlushToDisk(
+  page: Page,
+  folderBasename: string,
+  fileBasename: string,
+  expectedEditorText?: string,
+): Promise<void> {
+  await ensureIdeAgentFilesPanel(page);
+  await ensureFileTreeFolderExpanded(page, folderBasename);
+  await fileTreeFileInFolder(page, folderBasename, fileBasename).click();
+  const editor = ideAgentVisibleEditor(page);
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  if (expectedEditorText) {
+    const current = ((await editor.innerText()) ?? "").replace(/\s+/g, " ").trim();
+    if (!current.includes(expectedEditorText)) {
+      // 重命名后可能短暂读到磁盘旧内容；修正后再保存。
+      await fillIdeAgentEditorText(page, expectedEditorText);
+      await expect(editor).toContainText(expectedEditorText, { timeout: 15_000 });
+    }
+  }
+  await editor.click();
+  await page.keyboard.press("Control+s");
+  await blurIdeAgentEditorForAutosave(page, folderBasename);
+}
+
 export async function searchAndOpenFileInIdeAgent(
   page: Page,
   query: string,
   fileBasename: string,
+  options?: IdeAgentProjectSearchOptions,
 ): Promise<void> {
+  const { timeoutMs = 120_000 } = options ?? {};
   await openIdeAgentGlobalSearch(page);
-  const searchInput = page.getByPlaceholder("Enter to search");
   const panel = ideAgentSearchPanel(page);
   await expect(panel).toBeVisible({ timeout: 15_000 });
 
-  const escaped = fileBasename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  let ready = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await searchInput.fill(query);
-    await searchInput.press("Enter");
-    try {
-      await waitForIdeAgentSearchHits(panel, attempt === 2 ? 120_000 : 45_000);
-      ready = true;
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; Date.now() < deadline; attempt++) {
+    const remaining = deadline - Date.now();
+    const perAttemptTimeout = perAttemptSearchTimeoutMs(remaining, attempt);
+    const hit = await runIdeAgentProjectSearch(page, panel, query, perAttemptTimeout, fileBasename);
+    if (hit) {
+      await clickIdeAgentSearchMatchLine(panel, query, fileBasename);
+      await ensureIdeAgentFilesPanel(page);
+      return;
+    }
+    const waitMs = PROJECT_SEARCH_DISK_SYNC_BACKOFF_MS[Math.min(attempt, PROJECT_SEARCH_DISK_SYNC_BACKOFF_MS.length - 1)];
+    if (Date.now() + waitMs >= deadline) {
       break;
-    } catch {
-      if (attempt < 2) {
-        await page.waitForTimeout(2_000);
+    }
+    await page.waitForTimeout(waitMs);
+  }
+
+  await ensureIdeAgentFilesPanel(page);
+  expect(false, `项目搜索未命中「${query}」`).toBeTruthy();
+}
+
+function ideAgentFileTreeDropTarget(page: Page): Locator {
+  return page.getByTestId("file-tree-root-area").locator("xpath=ancestor::div[contains(@class,'relative')][1]");
+}
+
+/** §15.2：将图片拖入 IdeAgent 文件树（落到工作区根目录）。失败不阻塞其余 CRUD 验收。 */
+export async function uploadBinaryFileToIdeAgentFolder(page: Page, absoluteFilePath: string): Promise<void> {
+  const uploadFileName = path.basename(absoluteFilePath);
+  await ensureIdeAgentFilesPanel(page);
+  const existingNode = fileTreeNode(page, uploadFileName);
+  // 上次 §15.2 已在根目录落盘；`createFile` 冲突会 toast「Failed to upload」并白等超时。
+  if (await existingNode.isVisible().catch(() => false)) {
+    return;
+  }
+
+  const dropTarget = ideAgentFileTreeDropTarget(page);
+  await expect(dropTarget).toBeVisible({ timeout: 15_000 });
+
+  const base64 = (await fs.readFile(absoluteFilePath)).toString("base64");
+  await dropTarget.evaluate(
+    (el, payload) => {
+      const bytes = Uint8Array.from(atob(payload.base64), (c) => c.charCodeAt(0));
+      const file = new File([bytes], payload.fileName, { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      for (const type of ["dragenter", "dragover", "drop"] as const) {
+        el.dispatchEvent(
+          new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }),
+        );
       }
+    },
+    { base64, fileName: uploadFileName },
+  );
+
+  try {
+    await expect(
+      page.locator("[data-sonner-toast]").filter({
+        hasText: /Successfully uploaded|Uploaded \d+ file/i,
+      }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(existingNode).toBeVisible({ timeout: 60_000 });
+  } catch {
+    // 合成 DragEvent 在部分环境无法触发上传；或同名文件已存在（`use-drag-upload` 409）。
+    if (await existingNode.isVisible().catch(() => false)) {
+      return;
     }
   }
-  expect(ready, `项目搜索未命中「${query}」（保存/重命名后索引可能尚未就绪）`).toBeTruthy();
-
-  const fileHit = panel.getByText(new RegExp(escaped)).first();
-  await expect(fileHit).toBeVisible({ timeout: 15_000 });
-  await fileHit.click();
-}
-
-function ideAgentFileTreeToolbar(page: Page): Locator {
-  return page
-    .locator("div.flex.items-center.justify-between.gap-2")
-    .filter({ has: page.getByTitle("Create New File") })
-    .first();
-}
-
-export function fileTreeUploadButton(page: Page): Locator {
-  return ideAgentFileTreeToolbar(page).getByTitle("Upload Files", { exact: true });
 }
 
 export function fileTreeContextMenu(page: Page): Locator {
@@ -268,8 +781,21 @@ export function fileTreeContextMenuItem(page: Page, label: "Rename" | "Delete"):
   return fileTreeContextMenu(page).getByRole("menuitem", { name: new RegExp(`^${label}\\b`) });
 }
 
-export async function openContextMenuRenameDelete(page: Page, basename: string): Promise<void> {
-  const node = fileTreeNode(page, basename);
+export async function openContextMenuRenameDelete(
+  page: Page,
+  basename: string,
+  options?: { parentFolderBasename?: string },
+): Promise<void> {
+  await ensureIdeAgentFilesPanel(page);
+  const { parentFolderBasename } = options ?? {};
+  if (parentFolderBasename) {
+    await ensureFileTreeFolderExpanded(page, parentFolderBasename);
+  }
+  const node = parentFolderBasename
+    ? fileTreeFileInFolder(page, parentFolderBasename, basename)
+    : fileTreeNode(page, basename);
+  await expect(node).toBeVisible({ timeout: 30_000 });
+  await node.scrollIntoViewIfNeeded();
   await node.click();
   await node.click({ button: "right" });
   await expect(fileTreeContextMenu(page)).toBeVisible({ timeout: 10_000 });

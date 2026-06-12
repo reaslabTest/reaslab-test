@@ -2,7 +2,7 @@ import type { Page, Response } from "@playwright/test";
 
 /** WSL / Cloudflare / Chromium 首跳等场景下常见的瞬时导航失败（可重试）。 */
 const TRANSIENT_NAV_PATTERN =
-  /ERR_(CONNECTION_CLOSED|CONNECTION_RESET|TIMED_OUT|NETWORK_CHANGED|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CERT_VERIFIER_CHANGED)|NS_ERROR_/i;
+  /ERR_(ABORTED|CONNECTION_CLOSED|CONNECTION_RESET|TIMED_OUT|NETWORK_CHANGED|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CERT_VERIFIER_CHANGED)|NS_ERROR_|Timeout.*exceeded/i;
 
 export function isTransientNavigationError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
