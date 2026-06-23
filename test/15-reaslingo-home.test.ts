@@ -7,7 +7,6 @@ import { E2E_WAF_BYPASS_CONTEXT } from "../common/global-setup";
 import {
   blurIdeAgentEditorForAutosave,
   cleanupCh15E2eArtifacts,
-  clickFileTreeFolder,
   deleteFileTreeFolder,
   uploadBinaryFileToIdeAgentFolder,
   chatSessionByTitle,
@@ -24,6 +23,7 @@ import {
   fillIdeAgentEditorText,
   fileTreeFileInFolder,
   ideAgentVisibleEditor,
+  openIdeAgentFileInFolder,
   findChatSessionAfterSend,
   ideAgentHeader,
   ideAgentSendUserMessage,
@@ -94,10 +94,9 @@ test.describe("15. 首页顶栏 ReasLingo", () => {
 
     try {
       await createTreeNode(page, "Create new folder", folderName);
-      await clickFileTreeFolder(page, folderName);
-      await createTreeNode(page, "Create New File", fileName);
+      await createTreeNode(page, "Create New File", fileName, { parentFolderBasename: folderName });
 
-      await fileTreeFileInFolder(page, folderName, fileName).click();
+      await openIdeAgentFileInFolder(page, folderName, fileName);
       await fillIdeAgentEditorText(page, fileMarkerEdited);
       await page.keyboard.press("Control+s");
       await expect(ideAgentVisibleEditor(page)).toContainText(fileMarkerEdited, { timeout: 30_000 });

@@ -77,7 +77,19 @@ export async function navigateToPlayground(page: Page): Promise<void> {
     await expect(pgLink).toBeVisible({ timeout: 60_000 });
     await pgLink.click();
   }
-  await page.waitForURL(/\/playground\/?$/i, { timeout: 60_000 });
+  // iipe `client-cache-recovery.ts` 硬刷新时会附加 `?_cv=`；pathname 仍为 `/playground`。
+  await expect
+    .poll(
+      async () => {
+        try {
+          return /^\/playground\/?$/i.test(new URL(page.url()).pathname);
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 60_000, intervals: [100, 250, 500, 1_000] },
+    )
+    .toBe(true);
 }
 
 export async function waitForPlaygroundLeanEditor(page: Page): Promise<void> {

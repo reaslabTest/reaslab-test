@@ -387,14 +387,24 @@ export async function createTreeNode(
   page: Page,
   title: "Create New File" | "Create new folder",
   name: string,
+  options?: { parentFolderBasename?: string },
 ): Promise<void> {
+  const { parentFolderBasename } = options ?? {};
+  if (parentFolderBasename) {
+    await clickFileTreeFolder(page, parentFolderBasename);
+  }
+
   await page.getByTitle(title).first().click();
   const input = page.locator('[data-filetree-node="true"] input').first();
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.fill(name);
   await input.press("Enter");
   const kind: FileTreeNodeKind = title === "Create new folder" ? "directory" : "file";
-  await expect(fileTreeNodeByBasename(page, name, kind)).toBeVisible({ timeout: 60_000 });
+  const createdNode =
+    parentFolderBasename && kind === "file"
+      ? fileTreeFileInFolder(page, parentFolderBasename, name)
+      : fileTreeNodeByBasename(page, name, kind);
+  await expect(createdNode).toBeVisible({ timeout: 60_000 });
 }
 
 function fileTreeRenameInput(page: Page): Locator {
@@ -650,13 +660,72 @@ export async function blurIdeAgentEditorForAutosave(page: Page, folderBasename: 
 }
 
 export function ideAgentVisibleEditor(page: Page): Locator {
-  return page.locator(".cm-content").filter({ visible: true }).first();
+  return ideAgentEditorColumn(page).locator(".cm-content").filter({ visible: true }).first();
+}
+
+/**
+ * 等待 IdeAgent 右侧 CodeMirror 就绪。`createFile` 会 `setActivePathname`，但 Loro 首 sync 完成前
+ * 仅显示 `EditorLoadingOverlay`（「Syncing document…」），无 `.cm-content`。
+ */
+export async function waitForIdeAgentEditorReady(page: Page, timeoutMs = 120_000): Promise<void> {
+  const editorColumn = ideAgentEditorColumn(page);
+  await expect
+    .poll(
+      async () => {
+        if (await editorColumn.getByText(/Sync initialization failed/i).isVisible().catch(() => false)) {
+          throw new Error("IdeAgent 文档同步失败，编辑器无法加载");
+        }
+        if (await editorColumn.getByText(/Syncing document/i).isVisible().catch(() => false)) {
+          return false;
+        }
+        if (await editorColumn.getByText(/Loading\.\.\./i).isVisible().catch(() => false)) {
+          return false;
+        }
+        if (
+          await editorColumn
+            .getByText(/Failed to sync document|Timed out waiting for the first document sync/i)
+            .isVisible()
+            .catch(() => false)
+        ) {
+          return false;
+        }
+        return await ideAgentVisibleEditor(page).isVisible().catch(() => false);
+      },
+      { timeout: timeoutMs, intervals: [300, 600, 1_000, 2_000] },
+    )
+    .toBe(true);
+}
+
+/** 在 Files 面板打开文件夹内文件；若首 sync 较慢则点击后长等 CodeMirror。 */
+export async function openIdeAgentFileInFolder(
+  page: Page,
+  folderBasename: string,
+  fileBasename: string,
+): Promise<void> {
+  await ensureIdeAgentFilesPanel(page);
+  await ensureFileTreeFolderExpanded(page, folderBasename);
+  const fileNode = fileTreeFileInFolder(page, folderBasename, fileBasename);
+  await expect(fileNode).toBeVisible({ timeout: 60_000 });
+  await fileNode.scrollIntoViewIfNeeded();
+
+  const deadline = Date.now() + 120_000;
+  for (let attempt = 0; Date.now() < deadline; attempt++) {
+    await fileNode.click();
+    try {
+      await waitForIdeAgentEditorReady(page, Math.max(15_000, deadline - Date.now()));
+      return;
+    } catch (error) {
+      if (attempt >= 2) {
+        throw error;
+      }
+    }
+  }
 }
 
 /** CodeMirror + Loro：`pressSequentially` 易与协同抢写丢字；`insertText` 一次性写入。 */
 export async function fillIdeAgentEditorText(page: Page, text: string): Promise<void> {
+  await waitForIdeAgentEditorReady(page);
   const editor = ideAgentVisibleEditor(page);
-  await expect(editor).toBeVisible({ timeout: 30_000 });
   await editor.click();
   await page.keyboard.press("Control+a");
   await page.keyboard.insertText(text);
@@ -677,9 +746,8 @@ export async function saveIdeAgentFileInFolderAndFlushToDisk(
 ): Promise<void> {
   await ensureIdeAgentFilesPanel(page);
   await ensureFileTreeFolderExpanded(page, folderBasename);
-  await fileTreeFileInFolder(page, folderBasename, fileBasename).click();
+  await openIdeAgentFileInFolder(page, folderBasename, fileBasename);
   const editor = ideAgentVisibleEditor(page);
-  await expect(editor).toBeVisible({ timeout: 30_000 });
   if (expectedEditorText) {
     const current = ((await editor.innerText()) ?? "").replace(/\s+/g, " ").trim();
     if (!current.includes(expectedEditorText)) {
